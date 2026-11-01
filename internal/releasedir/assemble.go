@@ -60,8 +60,17 @@ func inside(root, rel string) (string, error) {
 	return p, nil
 }
 
+// excluded reports whether rel (relative to the copied folder) is left out. A pattern that starts with "/" is anchored: it
+// matches only that path from the root of the copied folder ("/tests" is the application's own tests folder, not the
+// vendor/*/tests folders that a library may need at run time). Any other pattern matches a path or any file or folder name.
 func excluded(rel string, patterns []string) bool {
 	for _, p := range patterns {
+		if anchored, ok := strings.CutPrefix(p, "/"); ok {
+			if m, _ := path.Match(anchored, filepath.ToSlash(rel)); m {
+				return true
+			}
+			continue
+		}
 		if ok, _ := path.Match(p, filepath.ToSlash(rel)); ok {
 			return true
 		}

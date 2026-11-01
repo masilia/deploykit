@@ -22,6 +22,9 @@ type TemplateSpec struct {
 
 var templateName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$`)
 
+// backendProxyPass is what {{varnish_proxy_pass}} stands for when Varnish is not used: the second nginx server of the site.
+const backendProxyPass = "proxy_pass http://127.0.0.1:8080;" //nolint:gosec // an nginx directive, not a credential
+
 const (
 	documentRootFilename = "fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;"
 	realpathFilename     = "fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;"
@@ -29,7 +32,7 @@ const (
 
 // PHPTemplate derives the body of a custom template from the text of a base one: the first line carries the root
 // directory and PHP version that CloudPanel prefills (`#{"rootDirectory":…}`), and the script path given to PHP-FPM is the
-// real path of the document root. With a symlinked release the web server then hands PHP-FPM the path of the release
+// real path of the document root, and the front server forwards to the site's backend (no Varnish in this profile). With a symlinked release the web server then hands PHP-FPM the path of the release
 // itself, so opcache and the realpath cache never see the old release after the link moves and no reload is needed.
 func PHPTemplate(base, rootDirectory, phpVersion string) (string, error) {
 	if strings.Count(base, documentRootFilename) == 0 {
@@ -40,6 +43,10 @@ func PHPTemplate(base, rootDirectory, phpVersion string) (string, error) {
 		return "", err
 	}
 	body := strings.ReplaceAll(base, documentRootFilename, realpathFilename+"\n    fastcgi_param DOCUMENT_ROOT $realpath_root;")
+	// A template made with `vhost-template:add` has no Varnish settings, so CloudPanel renders {{varnish_proxy_pass}} as nothing and
+	// the HTTPS server would serve the document root as static files (403 "directory index is forbidden"). This profile has no
+	// Varnish: the front server forwards straight to the site's backend.
+	body = strings.ReplaceAll(body, "{{varnish_proxy_pass}}", backendProxyPass)
 	return "#" + string(header) + "\n" + strings.TrimLeft(body, "\n"), nil
 }
 
@@ -67,10 +74,11 @@ func (c *Client) EnsureVhostTemplate(ctx context.Context, s TemplateSpec) (creat
 	if err != nil {
 		return false, err
 	}
-	// The body travels on stdin and is written by the server's own shell: no quoting problem, nothing in an argument.
+	// The body travels on stdin and is written by the server's own shell: no quoting problem, nothing in an argument. The
+	// file is readable by everyone because clpctl reads it as another user than root (a 0600 file fails with "Permission denied").
 	_, err = c.Root.Run(ctx, transport.Spec{
 		Script: "set -e\nf=$(mktemp)\ntrap 'rm -f \"$f\"' EXIT\ncat > \"$f\" <<'DEPLOYKIT_TEMPLATE_END'\n" + body +
-			"\nDEPLOYKIT_TEMPLATE_END\n" + `clpctl vhost-template:add --name="$CP_NAME" --file="$f"` + "\n",
+			"\nDEPLOYKIT_TEMPLATE_END\n" + "chmod 0644 \"$f\"\n" + `clpctl vhost-template:add --name="$CP_NAME" --file="$f"` + "\n",
 		Env: map[string]string{"CP_NAME": s.Name},
 	})
 	if err != nil {

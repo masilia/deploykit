@@ -279,13 +279,16 @@ func TestPHPTemplateFollowsTheCurrentLink(t *testing.T) {
 	if first, _, _ := strings.Cut(got, "\n"); first != `#{"phpVersion":"8.2","rootDirectory":"current/public"}` {
 		t.Errorf("header = %q", first)
 	}
-	for _, want := range []string{"fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;", "fastcgi_param DOCUMENT_ROOT $realpath_root;", "{{php_fpm_port}}", "{{varnish_proxy_pass}}", "{{root}}"} {
+	for _, want := range []string{"fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;", "fastcgi_param DOCUMENT_ROOT $realpath_root;", "{{php_fpm_port}}", "proxy_pass http://127.0.0.1:8080;", "{{root}}"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the template lacks %q", want)
 		}
 	}
 	if strings.Contains(got, "$document_root$fastcgi_script_name") {
 		t.Error("the old script path must be gone")
+	}
+	if strings.Contains(got, "{{varnish_proxy_pass}}") {
+		t.Error("without Varnish settings the placeholder renders empty and the front server would serve static files")
 	}
 	// Only the PHP location changes: every other line of the base is kept.
 	if strings.Count(got, "\n") != strings.Count(string(base), "\n")+2 {
@@ -307,7 +310,7 @@ func TestEnsureVhostTemplateCreatesItOnceFromTheBase(t *testing.T) {
 		t.Fatalf("created = %v, err = %v", created, err)
 	}
 	trace := root.Trace()
-	for _, want := range []string{"CP_BASE=Symfony 7", "vhost-template:add", "CP_NAME=deploykit-site", `#{"phpVersion":"8.2","rootDirectory":"current/public"}`, "$realpath_root"} {
+	for _, want := range []string{"CP_BASE=Symfony 7", `chmod 0644 "$f"`, "vhost-template:add", "CP_NAME=deploykit-site", `#{"phpVersion":"8.2","rootDirectory":"current/public"}`, "$realpath_root"} {
 		if !strings.Contains(trace, want) {
 			t.Errorf("trace lacks %q:\n%s", want, trace)
 		}

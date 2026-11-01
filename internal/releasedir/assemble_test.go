@@ -141,3 +141,31 @@ func TestNormalizeTimes(t *testing.T) {
 		}
 	}
 }
+
+// A leading slash anchors an exclusion at the root of the copied folder: the application's tests/ go, the tests/ of a library
+// that needs its fixtures at run time (Ibexa reads vendor/ibexa/core/tests/…) stay.
+func TestAnchoredExclusionKeepsNestedFoldersOfTheSameName(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	for _, f := range []string{"tests/a.php", "vendor/lib/tests/fixture.txt", "var/cache/x", "vendor/lib/var/keep", "public/var/img", ".env.local", "config/.env.local"} {
+		p := filepath.Join(src, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	steps := []manifest.AssembleStep{{From: ".", To: ".", Exclude: []string{"/tests", "/var", "/public/var", ".env.local"}}}
+	if err := Assemble(src, dst, steps); err != nil {
+		t.Fatal(err)
+	}
+	for f, want := range map[string]bool{
+		"tests/a.php": false, "vendor/lib/tests/fixture.txt": true, "var/cache/x": false, "vendor/lib/var/keep": true,
+		"public/var/img": false, ".env.local": false, "config/.env.local": false,
+	} {
+		_, err := os.Stat(filepath.Join(dst, f))
+		if (err == nil) != want {
+			t.Errorf("%s: present = %v, want %v", f, err == nil, want)
+		}
+	}
+}

@@ -37,7 +37,7 @@ artifact:
 [[- end ]]
 [[- end ]]
   assemble:
-    - { from: [[ q .AssembleFrom ]], to: ".", exclude: [var, node_modules, tests, .env.local, public/var, .git] }
+    - { from: [[ q .AssembleFrom ]], to: ".", exclude: [/var, /node_modules, /tests, /public/var, .env.local, .git] }
   keep: 3                       # releases kept on the server
 
 # --- Runtime: the PHP-FPM pool of the CloudPanel site -------------------------------------------------------------

@@ -167,3 +167,40 @@ func TestRemoteHelpersRejectBadStamps(t *testing.T) {
 		t.Error("nothing may reach the server for an invalid stamp")
 	}
 }
+
+// The switch must work on a real folder named current (what CloudPanel creates for a PHP site) without destroying it.
+func TestSwitchSetsAsideARealCurrentFolder(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	root := t.TempDir()
+	for _, d := range []string{"releases/20261027120000", "current/public"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "current/public/index.php"), []byte("<?php // placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Switch(t.Context(), transport.NewLocal(), Layout{Root: root}, "20261027120000"); err != nil {
+		t.Fatal(err)
+	}
+	target, err := os.Readlink(filepath.Join(root, "current"))
+	if err != nil || target != "releases/20261027120000" {
+		t.Fatalf("current must be a link to the release: %q, %v", target, err)
+	}
+	aside, _ := filepath.Glob(filepath.Join(root, "current.replaced.*"))
+	if len(aside) != 1 {
+		t.Fatalf("the folder must be kept aside: %v", aside)
+	}
+	if data, _ := os.ReadFile(filepath.Join(aside[0], "public/index.php")); string(data) != "<?php // placeholder" {
+		t.Errorf("the placeholder was altered: %q", data)
+	}
+	// A second switch finds a link: nothing more is set aside.
+	if err := Switch(t.Context(), transport.NewLocal(), Layout{Root: root}, "20261027120000"); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := filepath.Glob(filepath.Join(root, "current.replaced.*")); len(again) != 1 {
+		t.Errorf("only the first switch sets a folder aside: %v", again)
+	}
+}

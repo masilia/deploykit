@@ -162,8 +162,11 @@ func Switch(ctx context.Context, t transport.Transport, l Layout, stamp string) 
 		return fmt.Errorf("invalid release stamp %q", stamp)
 	}
 	_, err := t.Run(ctx, transport.Spec{
+		// CloudPanel creates `current/public/index.php` as real folders when a PHP site is made with the root directory
+		// current/public; a link cannot replace a folder (`mv -T`), so the first switch sets such a folder aside, never deletes it.
 		Script: `set -e
 cd "$DK_ROOT"
+if [ -d current ] && [ ! -L current ]; then mv current "current.replaced.$(date +%Y%m%d%H%M%S)"; fi
 ln -sfn "releases/$DK_STAMP" current.tmp
 mv -Tf current.tmp current
 `,

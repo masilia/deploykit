@@ -291,3 +291,15 @@ func TestRsyncRetriesAnInterruptedTransferButNotAPermissionError(t *testing.T) {
 		t.Errorf("an authentication failure must not be retried (calls %d, err %v)", calls(t, rec), err)
 	}
 }
+
+func TestAKeepAliveTimeoutIsASessionLostNotAConnectionRefused(t *testing.T) {
+	bin, rec := flaky(t, 99, "", "Connection to 203.0.113.9 port 22 timed out", 255)
+	var delays []time.Duration
+	_, err := retrying(bin, &delays).Run(t.Context(), Spec{Script: "true\n"})
+	if err == nil || !strings.Contains(err.Error(), "may have partly run") {
+		t.Errorf("the error should warn that the effect is unknown: %v", err)
+	}
+	if calls(t, rec) != 1 {
+		t.Errorf("attempts = %d: a session that broke must not be replayed", calls(t, rec))
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -93,6 +94,8 @@ func connectionNotEstablished(res Result) bool {
 	return false
 }
 
+var sessionTimedOut = regexp.MustCompile(`Connection to \S+ port \d+ timed out`)
+
 // connectionLost reports an ssh session that broke while the remote command was running.
 func connectionLost(res Result) bool {
 	if res.ExitCode != 255 || connectionNotEstablished(res) {
@@ -103,7 +106,8 @@ func connectionLost(res Result) bool {
 			return true
 		}
 	}
-	return false
+	// OpenSSH 9: a session whose keep-alives went unanswered ends with "Connection to <host> port <n> timed out".
+	return sessionTimedOut.MatchString(res.Stderr)
 }
 
 // transientRsync reports an rsync failure worth another attempt. rsync is idempotent (the same sources, the same

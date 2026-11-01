@@ -93,3 +93,34 @@ from read-only inspection of CloudPanel 6.0.8 and one measurement (details in `d
 - Building the publisher token took longer than the measurement: Mercure 1.0 wants `typ: at+jwt`, `iss`, `aud` (the hub
   URL as it sees the request), `exp` and an RFC 9396 `authorization_details` grant, and subscribers use `match=`, not
   `topic=`. `scripts/sse-check.sh` encodes all of it.
+
+## Round 4: the php-fpm runtime on a throwaway CloudPanel PHP site
+
+A snapshot of the server was taken first (vhosts, home folders, users, listening ports, PHP-FPM pools, CloudPanel sites and templates, MySQL
+databases and users, certificates, containers, crontabs); afterwards the server was **identical** to it.
+
+| Flow | Result |
+|---|---|
+| `bootstrap` | derived a vhost template from "Symfony 7" (first line `#{"rootDirectory":"current/public","phpVersion":"8.2"}`, `$realpath_root`, an explicit `proxy_pass` to the site's backend), created the site with it (CloudPanel stored the root directory `…/current/public`), a PHP 8.2 FPM pool, `releases/` and `shared/`; the certificate step warned (no DNS) |
+| `deploy` of a small PHP app, four versions | upload, shared links, `prepare` commands in the new release, atomic switch, `after_switch`, pruning to three releases; the extension check against `composer.json` passed |
+| the switch with **no PHP-FPM reload** | the very next request to the site's backend was served by the new release (its real path in the response): `$realpath_root` works |
+| a version whose home page answers 503 | detected, switched back to the previous release, `after_switch` run again, the release marked failed |
+| a failing `prepare` command (a migration) | the deploy stopped before the switch: the live release was untouched |
+| `run`, `rollback`, `rollback --to`, `status`, `fleet status`, `fleet healthcheck`, `doctor` | all behaved as for the other runtimes |
+| the **real Ibexa 4.6 project** | built in a throwaway container (composer, yarn, Encore, 1 min 40 s), 422 MB uploaded in 18 to 27 s, `cache:warmup` on the server, switched, served through nginx and PHP-FPM (the home page redirects to the login page); a 500 before the project's own environment variables were set was detected and rolled back by the health check |
+
+Findings that only the real server could show (all fixed, with tests):
+
+1. `clpctl vhost-template:add --file` is read by another user than root: a mode 0600 temporary file fails with "Permission denied".
+2. CloudPanel creates `current/public/index.php` as **real folders** when the root directory is `current/public`, and a link cannot replace a
+   folder (`mv -T`): the first switch now sets such a folder aside (`current.replaced.<time>`), never deletes it.
+3. A template made with `vhost-template:add` has no Varnish settings, so CloudPanel renders `{{varnish_proxy_pass}}` as nothing and the HTTPS front
+   served the document root as static files (403 "directory index is forbidden"). The derived template forwards to the backend itself.
+4. An unanchored exclusion `tests` also removed `vendor/*/tests`, whose fixtures Ibexa reads at run time. A leading `/` now anchors an exclusion at
+   the root of the copied folder (`/tests`).
+5. Building from a clean export needs the variables the kernel reads without a default (`build.env`): one was only a comment in the project's `.env`.
+6. The workstation's own PHP lacked the extensions of the project: `build.image` runs the build commands in a throwaway container instead.
+7. A session ended by unanswered keep-alives prints `Connection to <host> port <n> timed out`; it is now recognised as a lost session, never replayed.
+
+Not covered: Redis, Solr and Varnish (profile B, the Docker stack), a database dump of a real site (the test used a clean install), and the
+live site's cutover.
