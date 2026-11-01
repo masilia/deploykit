@@ -182,3 +182,20 @@ func TestDescribe(t *testing.T) {
 		t.Errorf("row = %+v", r)
 	}
 }
+
+func TestNodeTable(t *testing.T) {
+	rows := []NodeRow{
+		{Target: "a", Domain: "a.example", Host: "u@h", Live: "20261026000000", Commit: "abc1234", Previous: "20261025000000", Contract: "supervised", Reachable: true},
+		{Target: "b", Host: "u@h2", Reachable: true},
+		{Target: "c", Host: "u@h3"},
+	}
+	out := FormatNodeTable(rows)
+	for _, want := range []string{"LIVE", "abc1234", "supervised", "to deploy", "c              — (unreachable: u@h3)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table lacks %q:\n%s", want, out)
+		}
+	}
+	if rows[0].State() != "OK" || rows[1].State() != "to deploy" || rows[2].State() != "unreachable" {
+		t.Errorf("states = %s, %s, %s", rows[0].State(), rows[1].State(), rows[2].State())
+	}
+}

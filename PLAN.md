@@ -174,9 +174,8 @@ first, `.status` files instead of mtimes, one `rsync` trailing-slash rule for mi
 
 ## Remaining work
 
-SSH retries are done: a connection that cannot be established is retried twice (2 s, then 4 s; `ssh.retries`, `ssh.connect_timeout`), an rsync that was interrupted is retried, and a session that breaks while a script runs is reported as such, never replayed (a script can repeat its effects).
+`fleet status`, `healthcheck` and `deploy` work for pm2 targets too (`fleet backups` is compose-only). SSH retries are done: a connection that cannot be established is retried twice (2 s, then 4 s; `ssh.retries`, `ssh.connect_timeout`), an rsync that was interrupted is retried, and a session that breaks while a script runs is reported as such, never replayed (a script can repeat its effects).
 
-- `fleet` covers compose targets only, not pm2 targets.
 - The standalone (certbot) ingress and `renew-certs` have not run on a real host; neither has a reboot test of the pm2 systemd unit and the crons.
 - PHP runtime (needs a reference project), PHP web root and opcache behind CloudPanel.
 - The interactive `setup` wizard and the Bubble Tea TUI.

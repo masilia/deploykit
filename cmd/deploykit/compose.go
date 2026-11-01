@@ -211,6 +211,7 @@ type fleetFlags struct {
 	ids                          []string
 	all, supervised, continueErr bool
 	version                      string
+	node                         deploy.Options // pm2 deploy options
 }
 
 func (a *app) fleetCmd() *cobra.Command {
@@ -231,6 +232,19 @@ func (a *app) fleetCmd() *cobra.Command {
 			ts, err := a.fleetSelection(p, ff.ids, ff.all, ff.supervised)
 			if err != nil || ts == nil {
 				return err
+			}
+			if p.m.Runtime.Type == manifest.RuntimePM2 {
+				rows, err := a.nodeStatus(cmd.Context(), p, ts)
+				if err != nil {
+					return err
+				}
+				_, _ = fmt.Fprint(a.out, fleet.FormatNodeTable(rows))
+				for _, r := range rows {
+					if !r.Reachable {
+						return fmt.Errorf("at least one target is unreachable")
+					}
+				}
+				return nil
 			}
 			rows, err := a.composeStatus(cmd.Context(), p, ts)
 			if err != nil {
@@ -259,7 +273,7 @@ func (a *app) fleetCmd() *cobra.Command {
 			var failed []string
 			for _, t := range ts {
 				_, _ = fmt.Fprintf(a.out, "healthcheck %s …\n", t.ID)
-				if err := a.targetHealth(cmd.Context(), p, t); err != nil {
+				if err := a.fleetHealth(cmd.Context(), p, t); err != nil {
 					failed = append(failed, t.ID)
 					_, _ = fmt.Fprintf(a.out, "%s: FAILED: %v\n", t.ID, err)
 					continue
@@ -282,6 +296,9 @@ func (a *app) fleetCmd() *cobra.Command {
 			ts, err := a.fleetSelection(p, ff.ids, ff.all, ff.supervised)
 			if err != nil || ts == nil {
 				return err
+			}
+			if p.m.Runtime.Type == manifest.RuntimePM2 {
+				return fmt.Errorf("backups apply to compose targets: a pm2 site keeps no data of its own (its database, if any, is backed up elsewhere)")
 			}
 			fl, err := p.m.FleetConfig()
 			if err != nil {
@@ -325,11 +342,22 @@ func (a *app) fleetCmd() *cobra.Command {
 			if !ff.all && len(ff.ids) == 0 {
 				return fmt.Errorf("deploy needs an explicit target: --target ID or --all (a fleet deploy is never implicit)")
 			}
-			if ff.version == "" {
+			pm2 := p.m.Runtime.Type == manifest.RuntimePM2
+			switch {
+			case pm2 && ff.version != "":
+				return fmt.Errorf("a pm2 site has no version: use --ref to choose what to build (default: the manifest's source.ref)")
+			case !pm2 && ff.version == "":
 				return fmt.Errorf("deploy needs --version X.Y.Z")
 			}
 			ts, err := a.fleetSelection(p, ff.ids, ff.all, ff.supervised)
 			if err != nil || ts == nil {
+				return err
+			}
+			if pm2 {
+				_, err = fleet.Deploy(ctx, ts, ff.continueErr, func(s string) { _, _ = fmt.Fprintln(a.out, s) },
+					func(ctx context.Context, t *inventory.Target) error {
+						return a.nodeDeploy(ctx, cmd.ErrOrStderr(), p, t.ID, ff.node)
+					})
 				return err
 			}
 			_, err = fleet.Deploy(ctx, ts, ff.continueErr, func(s string) { _, _ = fmt.Fprintln(a.out, s) },
@@ -339,10 +367,21 @@ func (a *app) fleetCmd() *cobra.Command {
 			return err
 		},
 	}
-	deployCmd.Flags().StringVar(&ff.version, "version", "", "version to deploy (X.Y.Z)")
+	deployCmd.Flags().StringVar(&ff.version, "version", "", "compose: version to deploy (X.Y.Z)")
+	deployCmd.Flags().StringVar(&ff.node.Ref, "ref", "", "pm2: git ref to build (default: the manifest's source.ref)")
+	deployCmd.Flags().BoolVar(&ff.node.SkipInstall, "skip-install", false, "pm2: skip the dependency install")
+	deployCmd.Flags().BoolVar(&ff.node.SkipChecks, "skip-checks", false, "pm2: skip lint and type checks")
 	deployCmd.Flags().BoolVar(&ff.continueErr, "continue-on-error", false, "do not stop at the first failing target")
 	cmd.AddCommand(status, health, backups, deployCmd)
 	return cmd
+}
+
+// fleetHealth runs the health check of one target, whatever its runtime.
+func (a *app) fleetHealth(ctx context.Context, p *project, t *inventory.Target) error {
+	if p.m.Runtime.Type == manifest.RuntimePM2 {
+		return a.nodeHealth(ctx, p, t)
+	}
+	return a.targetHealth(ctx, p, t)
 }
 
 // targetHealth runs the health probes of one target over SSH.

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -44,6 +45,81 @@ func (a *app) newNode(p *project, t *inventory.Target, opts deploy.Options, work
 	})
 }
 
+// nodeDeploy builds and deploys one pm2 target.
+func (a *app) nodeDeploy(ctx context.Context, errOut io.Writer, p *project, targetID string, opts deploy.Options) error {
+	t, err := p.target(targetID)
+	if err != nil {
+		return err
+	}
+	// Outside the repository, always: Next.js resolves its tracing root from the topmost lockfile above the
+	// build, so a build inside <repo>/.deploykit nests server.js under .deploykit/src in the standalone output.
+	work, err := os.MkdirTemp("", "deploykit-")
+	if err != nil {
+		return err
+	}
+	if opts.BuildOnly {
+		_, _ = fmt.Fprintf(errOut, "build kept in %s\n", work)
+	} else {
+		defer func() { _ = os.RemoveAll(work) }()
+	}
+	n, err := a.newNode(p, t, opts, work)
+	if err != nil {
+		return err
+	}
+	return n.Deploy(ctx, a.runner(a.dryRun))
+}
+
+// nodeStatus queries the live release of each pm2 target.
+func (a *app) nodeStatus(ctx context.Context, p *project, targets []*inventory.Target) ([]fleet.NodeRow, error) {
+	rows := make([]fleet.NodeRow, len(targets))
+	for i, t := range targets {
+		rows[i] = fleet.NodeDescribe(t)
+		site, err := a.ssh(t, p.m, roleSite)
+		if err != nil {
+			return nil, err
+		}
+		layout := deploy.Layout{Root: t.Get("path")}
+		cur, err := deploy.Current(ctx, site, layout)
+		if err != nil {
+			continue
+		}
+		list, err := deploy.ListReleases(ctx, site, layout)
+		if err != nil {
+			continue
+		}
+		rows[i].Reachable, rows[i].Live = true, cur
+		for _, r := range list {
+			if r.Stamp == cur && r.Meta != nil {
+				rows[i].Commit = r.Meta.Commit
+			}
+			if rows[i].Previous == "" && r.Stamp != cur && r.Status != deploy.StatusFailed {
+				rows[i].Previous = r.Stamp
+			}
+		}
+	}
+	return rows, nil
+}
+
+// nodeHealth asks the server of a pm2 target to fetch its health path, as the end of a deploy does.
+func (a *app) nodeHealth(ctx context.Context, p *project, t *inventory.Target) error {
+	cfg, err := p.m.PM2()
+	if err != nil {
+		return err
+	}
+	site, err := a.ssh(t, p.m, roleSite)
+	if err != nil {
+		return err
+	}
+	code, ok, err := deploy.Healthy(ctx, site, t.Get("app_port"), cfg.Health)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%s answers %s, expected %d", cfg.Health.Path, orDash(code), cfg.Health.Expect)
+	}
+	return nil
+}
+
 func (a *app) deployCmd() *cobra.Command {
 	var (
 		target string
@@ -68,26 +144,7 @@ func (a *app) deployCmd() *cobra.Command {
 			default:
 				return fmt.Errorf("runtime %s is not implemented yet (pm2 and compose are)", p.m.Runtime.Type)
 			}
-			t, err := p.target(target)
-			if err != nil {
-				return err
-			}
-			// Outside the repository, always: Next.js resolves its tracing root from the topmost lockfile above the
-			// build, so a build inside <repo>/.deploykit nests server.js under .deploykit/src in the standalone output.
-			work, err := os.MkdirTemp("", "deploykit-")
-			if err != nil {
-				return err
-			}
-			if opts.BuildOnly {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "build kept in %s\n", work)
-			} else {
-				defer func() { _ = os.RemoveAll(work) }()
-			}
-			n, err := a.newNode(p, t, opts, work)
-			if err != nil {
-				return err
-			}
-			return n.Deploy(ctx, a.runner(a.dryRun))
+			return a.nodeDeploy(ctx, cmd.ErrOrStderr(), p, target, opts)
 		},
 	}
 	f := cmd.Flags()

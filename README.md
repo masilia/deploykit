@@ -40,6 +40,7 @@ deploykit deploy --install --version 1.0.0 -t acme --env first-run.env
 deploykit deploy --version 1.1.0 -t acme           # backup, pull, migrate, restart, verify, roll back on failure
 deploykit deploy --version 1.0.0 -t acme           # an older version is a deliberate rollback
 deploykit fleet status --all           # version, previous version and backup age of every target
+deploykit fleet deploy --all            # pm2 sites: build and deploy each target in rollout order (compose: --version X.Y.Z)
 ```
 
 Every command takes `--dry-run`: read-only checks run, nothing is changed. Examples to start from are in

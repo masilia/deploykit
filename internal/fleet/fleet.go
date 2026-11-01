@@ -165,3 +165,49 @@ func Deploy(ctx context.Context, targets []*inventory.Target, continueOnError bo
 	}
 	return nil, nil
 }
+
+// NodeRow is the state of one pm2 target: the live release and the one to go back to.
+type NodeRow struct {
+	Target   string
+	Domain   string
+	Host     string
+	Contract string
+	Live     string // stamp of the release `current` points at, empty when nothing was deployed yet
+	Commit   string
+	Previous string // newest other release that did not fail
+	// Reachable is false when the server could not be queried.
+	Reachable bool
+}
+
+// NodeDescribe fills the identity columns of a pm2 row from the inventory.
+func NodeDescribe(t *inventory.Target) NodeRow {
+	return NodeRow{Target: t.ID, Domain: t.Get("domain"), Host: t.Get("ssh_user") + "@" + t.Get("host"), Contract: t.Get("contract")}
+}
+
+// State is the one-word summary of a row.
+func (r NodeRow) State() string {
+	switch {
+	case !r.Reachable:
+		return "unreachable"
+	case r.Live == "":
+		return "to deploy"
+	}
+	return "OK"
+}
+
+// FormatNodeTable renders the status table of pm2 targets.
+func FormatNodeTable(rows []NodeRow) string {
+	var b strings.Builder
+	line := func(cols ...string) {
+		fmt.Fprintf(&b, "%-14s %-30s %-24s %-15s %-9s %-15s %-10s %s\n", cols[0], cols[1], cols[2], cols[3], cols[4], cols[5], cols[6], cols[7])
+	}
+	line("TARGET", "DOMAIN", "HOST", "LIVE", "COMMIT", "PREV", "CONTRACT", "STATE")
+	for _, r := range rows {
+		if !r.Reachable {
+			fmt.Fprintf(&b, "%-14s — (unreachable: %s)\n", r.Target, r.Host)
+			continue
+		}
+		line(r.Target, orDash(r.Domain), r.Host, orDash(r.Live), orDash(r.Commit), orDash(r.Previous), r.Contract, r.State())
+	}
+	return b.String()
+}
