@@ -173,8 +173,11 @@ func Manifest(a Answers) ([]byte, error) {
 		return nil, err
 	}
 	main := "compose.yaml.tmpl"
-	if a.Runtime == RuntimePM2 {
+	switch a.Runtime {
+	case RuntimePM2:
 		main = "pm2.yaml.tmpl"
+	case RuntimePHP:
+		main = "php.yaml.tmpl"
 	}
 	t := template.New("manifest").Delims(leftDelim, rightDelim).Funcs(funcs)
 	t.Funcs(template.FuncMap{"include": func(name string) (string, error) {

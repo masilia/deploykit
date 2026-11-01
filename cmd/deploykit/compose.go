@@ -238,7 +238,7 @@ func (a *app) fleetCmd() *cobra.Command {
 			if err != nil || ts == nil {
 				return err
 			}
-			if p.m.Runtime.Type == manifest.RuntimePM2 {
+			if p.m.ReleaseBased() {
 				rows, err := a.nodeStatus(cmd.Context(), p, ts)
 				if err != nil {
 					return err
@@ -312,8 +312,8 @@ func (a *app) fleetCmd() *cobra.Command {
 			if err != nil || ts == nil {
 				return err
 			}
-			if p.m.Runtime.Type == manifest.RuntimePM2 {
-				return fmt.Errorf("backups apply to compose targets: a pm2 site keeps no data of its own (its database, if any, is backed up elsewhere)")
+			if p.m.ReleaseBased() {
+				return fmt.Errorf("backups apply to compose targets: a pm2 or php-fpm site keeps no data of its own (its database, if any, is backed up elsewhere)")
 			}
 			fl, err := p.m.FleetConfig()
 			if err != nil {
@@ -358,10 +358,10 @@ func (a *app) fleetCmd() *cobra.Command {
 			if !ff.all && len(ff.ids) == 0 {
 				return fmt.Errorf("deploy needs an explicit target: --target ID or --all (a fleet deploy is never implicit)")
 			}
-			pm2 := p.m.Runtime.Type == manifest.RuntimePM2
+			pm2 := p.m.ReleaseBased()
 			switch {
 			case pm2 && ff.version != "":
-				return fmt.Errorf("a pm2 site has no version: use --ref to choose what to build (default: the manifest's source.ref)")
+				return fmt.Errorf("a release-based (pm2, php-fpm) site has no version: use --ref to choose what to build (default: the manifest's source.ref)")
 			case !pm2 && ff.version == "":
 				return fmt.Errorf("deploy needs --version X.Y.Z")
 			}
@@ -394,7 +394,7 @@ func (a *app) fleetCmd() *cobra.Command {
 
 // fleetHealth runs the health check of one target, whatever its runtime.
 func (a *app) fleetHealth(ctx context.Context, p *project, t *inventory.Target) error {
-	if p.m.Runtime.Type == manifest.RuntimePM2 {
+	if p.m.ReleaseBased() {
 		return a.nodeHealth(ctx, p, t)
 	}
 	return a.targetHealth(ctx, p, t)

@@ -62,6 +62,11 @@ standalone); an ingress may use `select` + `variants` (the `TLS_MODE` key: varia
   terminal `ui.Pretty` (spinner, folded output) draws the runner events and `cmd/deploykit/styled.go` draws `validate`,
   `doctor`, `status`, `fleet` and `healthcheck` with `ui.Styles` (`app.styled()` decides; tests set `app.forceStyled`).
   Every styled print has a plain twin with the exact old text, because the tests and the logs depend on it.
+- Release-based runtimes share one pipeline: `internal/deploy/node.go` (`Node`) runs source → build → assemble → upload → switch →
+  check → rollback → prune, and delegates what differs to `releaseRuntime` (`runtime.go`: `pm2Runtime`; `php.go`: `phpRuntime` with
+  shared links, `prepare`/`after_switch` named commands, extension check, health on the site's backend 127.0.0.1:8080). `build.image` runs the
+  build commands in a throwaway container (`releasedir.RunBuildStepInContainer`). php-fpm bootstrap (`bootstrap_php.go`) derives a CloudPanel vhost
+  template from a base one (`cloudpanel.PHPTemplate`, golden test on `testdata/symfony7.tpl`). ADR 0009.
 - `internal/scaffold` + `cmd/deploykit/cmd_init.go`: `init` and `target add`. `Detect` reads the repository; `Answers`
   (flags, or the form) feed `Files`, which renders the manifest from the annotated templates in `templates/` (delimiters
   `[[ ]]`, because the manifest's own `{{ }}` must pass through) and the target file; `NewPlan`/`Apply` write them without
@@ -99,5 +104,6 @@ standalone); an ingress may use `select` + `variants` (the `TLS_MODE` key: varia
 
 ## Not built yet
 
-PHP runtime and its manifest (hypothesis, no reference script), the Bubble Tea TUI for deploys, the standalone certbot ingress
-on a real host, and the PHP web root and opcache behind CloudPanel. See PLAN.md.
+The Docker stack profile for PHP (Ibexa with Redis, Solr, Varnish: the compose runtime plus project Dockerfiles), the php-fpm runtime on a
+real server (written and tested with fakes, and its release built for real, not run remotely yet), the Bubble Tea TUI for deploys, and the
+standalone certbot ingress on a real host. See PLAN.md.

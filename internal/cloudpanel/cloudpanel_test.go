@@ -3,6 +3,7 @@ package cloudpanel
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -263,5 +264,62 @@ func TestValidators(t *testing.T) {
 		if ValidSiteUser(s) != want {
 			t.Errorf("ValidSiteUser(%q) != %v", s, want)
 		}
+	}
+}
+
+func TestPHPTemplateFollowsTheCurrentLink(t *testing.T) {
+	base, err := os.ReadFile("testdata/symfony7.tpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := PHPTemplate(string(base), "current/public", "8.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first, _, _ := strings.Cut(got, "\n"); first != `#{"phpVersion":"8.2","rootDirectory":"current/public"}` {
+		t.Errorf("header = %q", first)
+	}
+	for _, want := range []string{"fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;", "fastcgi_param DOCUMENT_ROOT $realpath_root;", "{{php_fpm_port}}", "{{varnish_proxy_pass}}", "{{root}}"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the template lacks %q", want)
+		}
+	}
+	if strings.Contains(got, "$document_root$fastcgi_script_name") {
+		t.Error("the old script path must be gone")
+	}
+	// Only the PHP location changes: every other line of the base is kept.
+	if strings.Count(got, "\n") != strings.Count(string(base), "\n")+2 {
+		t.Errorf("expected one header line and one added parameter, got %d lines for %d", strings.Count(got, "\n"), strings.Count(string(base), "\n"))
+	}
+	if _, err := PHPTemplate("server { }", "current/public", "8.2"); err == nil {
+		t.Error("a base without the PHP location must be refused")
+	}
+}
+
+func TestEnsureVhostTemplateCreatesItOnceFromTheBase(t *testing.T) {
+	base, _ := os.ReadFile("testdata/symfony7.tpl")
+	root := transport.NewFake("root@srv")
+	root.On("clpctl vhost-templates:list", transport.Result{Stdout: "| Generic | | System |\n| Symfony 7 | public | System |\n"})
+	root.On("vhost-template:view", transport.Result{Stdout: string(base)})
+	c := &Client{Root: root}
+	created, err := c.EnsureVhostTemplate(t.Context(), TemplateSpec{Name: "deploykit-site", Base: "Symfony 7", RootDirectory: "current/public", PHPVersion: "8.2"})
+	if err != nil || !created {
+		t.Fatalf("created = %v, err = %v", created, err)
+	}
+	trace := root.Trace()
+	for _, want := range []string{"CP_BASE=Symfony 7", "vhost-template:add", "CP_NAME=deploykit-site", `#{"phpVersion":"8.2","rootDirectory":"current/public"}`, "$realpath_root"} {
+		if !strings.Contains(trace, want) {
+			t.Errorf("trace lacks %q:\n%s", want, trace)
+		}
+	}
+
+	again := transport.NewFake("root@srv")
+	again.On("clpctl vhost-templates:list", transport.Result{Stdout: "| deploykit-site | current/public | Custom |\n"})
+	created, err = (&Client{Root: again}).EnsureVhostTemplate(t.Context(), TemplateSpec{Name: "deploykit-site", Base: "Symfony 7", RootDirectory: "current/public", PHPVersion: "8.2"})
+	if err != nil || created {
+		t.Errorf("an existing template is left alone: created = %v, err = %v", created, err)
+	}
+	if strings.Contains(again.Trace(), "vhost-template:add") {
+		t.Error("nothing may be created the second time")
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
+	"sort"
 	"strings"
 
 	"github.com/masilia/deploykit/internal/manifest"
@@ -99,8 +101,31 @@ func BuildEnv(rd *manifest.ReleaseDir, vars tmpl.Vars) (map[string]string, error
 	return env, nil
 }
 
+// RunBuildStepInContainer runs one build step in a throwaway container: root (the export) is mounted at /work and the step
+// runs in /work/<workdir> as the calling user, so the files it writes are this user's. The build environment is passed by
+// name (`-e KEY`) and set on the docker process, so no value appears in an argument list.
+func RunBuildStepInContainer(ctx context.Context, local transport.Transport, image, root, workdir string, step BuildStep, env map[string]string, uid, gid int, out io.Writer) error {
+	argv := []string{
+		"docker", "run", "--rm", "-i", "--user", fmt.Sprintf("%d:%d", uid, gid),
+		"-v", root + ":/work", "-w", path.Join("/work", workdir), "-e", "HOME=/tmp",
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		argv = append(argv, "-e", k)
+	}
+	argv = append(argv, image, "sh", "-s")
+	script := "set -e\n" + strings.TrimRight(step.Command, "\n") + "\n"
+	_, err := local.Run(ctx, transport.Spec{Argv: argv, Stdin: strings.NewReader(script), Env: env, Out: out})
+	return err
+}
+
 // RunBuildStep runs one build command in dir with the build environment, streaming its output to out.
 func RunBuildStep(ctx context.Context, local transport.Transport, dir string, step BuildStep, env map[string]string, out io.Writer) error {
-	_, err := local.Run(ctx, transport.Spec{Script: step.Command + "\n", Dir: dir, Env: env, Out: out})
+	// A step may be several commands (a PHP build runs composer, then the asset compilation): the first failure stops it.
+	_, err := local.Run(ctx, transport.Spec{Script: "set -e\n" + strings.TrimRight(step.Command, "\n") + "\n", Dir: dir, Env: env, Out: out})
 	return err
 }

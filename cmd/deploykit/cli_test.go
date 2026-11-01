@@ -215,7 +215,7 @@ func TestPM2OnlyCommandsExplainThemselvesOnAComposeManifest(t *testing.T) {
 	h.app.manifestPath = filepath.Join("..", "..", "examples", "compose-app", "deploykit.yaml")
 	for _, cmd := range []string{"rollback"} {
 		err := h.run(cmd, "-t", "example")
-		if err == nil || !strings.Contains(err.Error(), "pm2 targets") || !strings.Contains(err.Error(), "compose") {
+		if err == nil || !strings.Contains(err.Error(), "pm2 and php-fpm targets") || !strings.Contains(err.Error(), "compose") {
 			t.Errorf("%s: err = %v", cmd, err)
 		}
 	}

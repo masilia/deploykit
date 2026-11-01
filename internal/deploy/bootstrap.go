@@ -43,8 +43,8 @@ func (b *Bootstrap) Run(ctx context.Context, r *runner.Runner) error {
 	if err := b.Manifest.Ingress.Decode(&cfg); err != nil {
 		return err
 	}
-	if cfg.Site.Type != "nodejs" {
-		return fmt.Errorf("this bootstrap provisions nodejs sites, not %q", cfg.Site.Type)
+	if cfg.Site.Type != "nodejs" && cfg.Site.Type != "php" {
+		return fmt.Errorf("this bootstrap provisions nodejs and php sites, not %q", cfg.Site.Type)
 	}
 	vars := b.Target.Vars()
 	vars["project"] = b.Manifest.Project
@@ -57,9 +57,12 @@ func (b *Bootstrap) Run(ctx context.Context, r *runner.Runner) error {
 	if root == "" || !strings.HasPrefix(root, "/") {
 		return fmt.Errorf("target %s: path must be an absolute directory", b.Target.ID)
 	}
-	port, err := strconv.Atoi(b.Target.Get("app_port"))
-	if err != nil {
-		return fmt.Errorf("target %s: app_port must be a number", b.Target.ID)
+	var port int
+	if cfg.Site.Type == "nodejs" {
+		var err error
+		if port, err = strconv.Atoi(b.Target.Get("app_port")); err != nil {
+			return fmt.Errorf("target %s: app_port must be a number", b.Target.ID)
+		}
 	}
 	var requireDNS []string
 	for _, h := range cfg.TLS.RequireDNS {
@@ -81,6 +84,12 @@ func (b *Bootstrap) Run(ctx context.Context, r *runner.Runner) error {
 	cp := &cloudpanel.Client{Root: b.Root, DNS: b.DNS}
 	layout := Layout{Root: strings.TrimRight(root, "/")}
 	siteExists := func(ctx context.Context) (bool, error) { return cp.SiteExists(ctx, root, domain) }
+	if cfg.Site.Type == "php" {
+		return b.runPHP(ctx, r, phpPlan{
+			cfg: cfg, cp: cp, layout: layout, domain: domain, user: user, root: root, pubkey: pubkey, password: pw,
+			requireDNS: requireDNS, siteExists: siteExists,
+		})
+	}
 
 	return r.Do(ctx,
 		runner.Step{

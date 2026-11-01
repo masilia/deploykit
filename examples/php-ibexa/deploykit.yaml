@@ -1,0 +1,90 @@
+# Example profile: Ibexa OSS 4.6 (Symfony 5.4) on a CloudPanel PHP site, release folders, PHP-FPM, "simple" installation:
+# legacy search, sessions and cache on the file system, no Redis, no Solr, no Varnish. For those, run the stack in Docker
+# (compose runtime). The application lives in the `ibexa/` folder of the repository.
+#
+# Everything is built on this machine (PHP with the project's extensions, composer, yarn: or a container, see build.image) and
+# the finished release is sent as it is: the server needs no composer and no node. A Symfony cache holds absolute paths, so var/cache is never sent: it is created and warmed
+# on the server, in each release.
+
+version: 1
+project: ibexa-site
+
+inventory: targets/             # one target per file `targets/<id>.env`, no secret
+
+# --- Artifact: built here from a clean `git archive` export ------------------------------------------------
+artifact:
+  type: release-dir
+  source: { ref: "HEAD" }       # a tag works as well: --ref v1.4.0
+  build:
+    workdir: ibexa              # the application lives in a subfolder of the repository
+    # image: ddev/ddev-webserver:v1.25.4   # build in a throwaway container instead of here: only Docker is needed, and the PHP
+    #                                      # version and extensions are the ones of the image (php8.2 is in it; `php` is another version)
+    env:                        # what the kernel needs to boot while compiling; the real values live in shared/.env.local on the server
+      APP_ENV: prod
+      APP_DEBUG: "0"
+      HTTPCACHE_PURGE_TYPE: local   # Ibexa HTTP cache: only a comment in a fresh .env, and prod refuses to boot without it
+      # Add any other variable the kernel reads without a default (the build prints "Environment variable not found: X").
+    # composer's own auto-scripts call `yarn install` and `cache:clear`: they are skipped, the steps below do the work.
+    install: composer install --no-dev --optimize-autoloader --no-interaction --no-scripts
+    command: |                  # one script, run with `set -e`; the assets are compiled here, nothing is compiled on the server
+      corepack yarn install --frozen-lockfile
+      php bin/console assets:install public
+      php bin/console ibexa:encore:compile --config-name app
+      php bin/console ibexa:encore:compile
+      php bin/console bazinga:js-translation:dump public/assets --merge-domains
+  assemble:
+    - { from: "ibexa/.", to: ".", exclude: [var, node_modules, tests, .env.local, public/var, .git] }
+  keep: 3                       # releases kept on the server
+
+# --- Runtime: the PHP-FPM pool of the CloudPanel site ----------------------------------------------------------
+runtime:
+  type: php-fpm
+  php_version: "8.2"
+  web_root: public              # the CloudPanel document root is current/public
+  shared:                       # kept in shared/ and linked into every release: they survive a deploy
+    - { path: .env.local, kind: file, required: true }   # the secrets (DATABASE_URL, APP_SECRET…): create it once, mode 600
+    - { path: var/log, kind: dir }
+    - { path: var/sessions, kind: dir }                  # file sessions
+    - { path: public/var, kind: dir }                    # the binary storage (images, files)
+    - { path: config/jwt, kind: dir }
+  writable: [var/cache]         # created empty in each release
+  env: { APP_ENV: prod }        # exported to the commands below
+  commands:                     # named, run in a release folder as the site user; {{ php }} is php8.2 (the system `php` is another version)
+    warmup:  "{{ php }} bin/console cache:warmup"
+    migrate: "{{ php }} -d memory_limit=512M bin/console kaliop:migration:migrate --no-interaction"
+    graphql: "{{ php }} bin/console ibexa:graphql:generate-schema"
+    clear:   "{{ php }} bin/console cache:clear"
+  php_extensions: auto          # the ext-* of composer.json are checked on the server (reported, never installed)
+  prepare: [warmup, migrate, graphql]   # in the new release, before the switch: a failure stops the deploy, the live site is untouched
+  after_switch: []              # after the switch and after a rollback: a failure is a warning
+  reload: none                  # none is enough with the template deploykit creates ($realpath_root); root-systemctl reloads php8.2-fpm as root
+  health:
+    path: /
+    expect: [200, 301, 302]
+    tries: 20
+    interval: 2s                # asked of 127.0.0.1:8080 (the site's backend, past Varnish) with the site's Host header
+
+# --- Ingress: a CloudPanel PHP site -------------------------------------------------------------------------------
+ingress:
+  type: cloudpanel
+  site:
+    type: php
+    php_version: "8.2"
+    # deploykit derives this template from the base one: root directory current/public, and the script path given to PHP-FPM
+    # is the real path of the release, so the switch needs no PHP-FPM reload.
+    vhost_template: { name: "deploykit-{{ project }}", base: "Symfony 7" }
+    user: "{{ target.site_user }}"
+    user_password: { generate: 24, show_once: true }   # only for CloudPanel's file manager (ADR 0006)
+  tls:
+    command: lets-encrypt
+    require_dns: ["{{ target.domain }}"]
+    on_failure: warn
+
+# --- SSH access ---------------------------------------------------------------------------------------------------
+ssh:
+  commands_on_stdin: true
+  provision_user: root          # `clpctl` requires root (or a sudoer)
+  connect_timeout: 10s
+  retries: 2
+  install_key_for_site_user:
+    public_key: auto

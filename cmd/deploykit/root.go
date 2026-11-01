@@ -36,6 +36,7 @@ func newRootCmdTo(out io.Writer, a *app) *cobra.Command {
 		a.validateCmd(),
 		a.deployCmd(),
 		a.rollbackCmd(),
+		a.runCmd(),
 		a.bootstrapCmd(),
 		a.statusCmd(),
 		a.doctorCmd(),

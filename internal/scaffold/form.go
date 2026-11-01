@@ -36,6 +36,7 @@ type draft struct {
 	dockerfiles                    []string
 	dockerfile, servicesText       string
 	smoke                          string
+	phpVersion, buildImage         string
 }
 
 func newDraft(a Answers) *draft {
@@ -45,7 +46,7 @@ func newDraft(a Answers) *draft {
 		domain: a.Target.Domain, siteUser: a.Target.SiteUser, path: a.Target.Path,
 		appPort: strconv.Itoa(a.Target.AppPort), proxyPort: strconv.Itoa(a.Target.ProxyPort),
 		features: a.Features, appService: a.AppService, migrate: a.MigrateCommand, health: a.HealthPath,
-		smoke: strings.Join(a.SmokePaths, ", "),
+		smoke: strings.Join(a.SmokePaths, ", "), phpVersion: a.PHPVersion, buildImage: a.BuildImage,
 	}
 	if len(a.ComposeFiles) > 0 {
 		d.composeFile = a.ComposeFiles[0]
@@ -76,10 +77,11 @@ func newDraft(a Answers) *draft {
 
 // cloudpanel reports whether the first target runs behind CloudPanel.
 func (d *draft) cloudpanel() bool {
-	return d.runtime == RuntimePM2 || d.ingress == IngressCloudPanel || (d.ingress == IngressSelect && d.tls != "certbot")
+	return d.runtime == RuntimePM2 || d.runtime == RuntimePHP || d.ingress == IngressCloudPanel || (d.ingress == IngressSelect && d.tls != "certbot")
 }
 
 func (d *draft) compose() bool { return d.runtime == RuntimeCompose }
+func (d *draft) php() bool     { return d.runtime == RuntimePHP }
 
 func siteUserFrom(domain string) string {
 	label, _, _ := strings.Cut(domain, ".")
@@ -125,7 +127,7 @@ func (d *draft) apply(a *Answers) error {
 		return n
 	}
 	a.Project, a.Runtime, a.Ingress = d.project, d.runtime, d.ingress
-	if d.runtime == RuntimePM2 {
+	if d.runtime == RuntimePM2 || d.runtime == RuntimePHP {
 		a.Ingress = IngressCloudPanel
 	}
 	a.Features, a.HealthPath = d.features, d.health
@@ -166,6 +168,9 @@ func (d *draft) apply(a *Answers) error {
 		if !a.Has(FeatChecks) {
 			a.Checks = nil
 		}
+	} else if d.php() {
+		a.PHPVersion, a.BuildImage = strings.TrimSpace(d.phpVersion), strings.TrimSpace(d.buildImage)
+		a.Features = nil
 	} else {
 		a.ComposeFiles = []string{strings.TrimSpace(d.composeFile)}
 		a.AppService, a.MigrateCommand = d.appService, strings.TrimSpace(d.migrate)
@@ -276,6 +281,20 @@ func DetectedFacts(f Findings) []string {
 			kind = "Next.js " + f.NextVersion
 		}
 		out = append(out, fmt.Sprintf("%s %s · Node %s", ui.IconOK, kind, f.NodeVersion))
+	case KindPHP:
+		kind := map[string]string{"ibexa": "Ibexa", "symfony": "Symfony", "php": "PHP"}[f.Framework]
+		v := ""
+		if f.PHPVersion != "" {
+			v = " · PHP " + f.PHPVersion
+		}
+		dir := ""
+		if f.PHPDir != "" {
+			dir = " in " + f.PHPDir + "/"
+		}
+		out = append(out, fmt.Sprintf("%s %s application%s%s", ui.IconOK, kind, dir, v))
+		if f.Full {
+			out = append(out, "! it uses "+strings.Join(f.FullReasons, ", ")+": the native profile below is for a simple installation (legacy search, files); full dependencies fit a Docker stack")
+		}
 	case KindCompose:
 		out = append(out, fmt.Sprintf("%s %s · %d services", ui.IconOK, f.ComposeFiles[0], len(f.Services)))
 		if f.Database != "" {
@@ -381,6 +400,7 @@ func initScreens(d *draft, a Answers, f Findings) []screen {
 			input("Project name", "Lower-case; names the compose project and the pm2 app.", &d.project, projectCheck),
 			pick("What are you deploying?", "", &d.runtime,
 				choice{"Next.js site on pm2 (CloudPanel Node.js site)", RuntimePM2},
+				choice{"PHP application on a CloudPanel PHP site (Symfony, Ibexa)", RuntimePHP},
 				choice{"Docker Compose stack (images from a registry)", RuntimeCompose}),
 		}},
 		{title: step(2, "Ingress"), hide: func() bool { return !d.compose() }, qs: []question{
@@ -403,7 +423,11 @@ func initScreens(d *draft, a Answers, f Findings) []screen {
 				choice{"CloudPanel (reverse-proxy site, Let's Encrypt by CloudPanel)", "cloudpanel"},
 				choice{"certbot (standalone nginx)", "certbot"}),
 		}},
-		{title: step(4, "Site"), hide: func() bool { return d.compose() || !d.cloudpanel() }, qs: []question{
+		{title: step(4, "Site"), hide: func() bool { return !d.php() }, qs: []question{
+			siteUserQ(),
+			pathQ("The site folder: releases/, shared/ and the current link live here."),
+		}},
+		{title: step(4, "Site"), hide: func() bool { return d.compose() || d.php() || !d.cloudpanel() }, qs: []question{
 			siteUserQ(),
 			pathQ("Where the site lives."),
 			input("App port", "The loopback port nginx forwards to; `bootstrap` takes the next free one if it is taken.", &d.appPort, validPort(1024)),
@@ -416,12 +440,22 @@ func initScreens(d *draft, a Answers, f Findings) []screen {
 		{title: step(4, "Site"), hide: func() bool { return !d.compose() || d.cloudpanel() }, qs: []question{
 			pathQ("The deployment root."),
 		}},
-		{title: step(5, "Features"), qs: []question{{
+		{title: step(5, "Features"), hide: func() bool { return d.php() }, qs: []question{{
 			kind: qMulti, title: "Which sections do you want?", desc: "Each chosen section is written with its comments.",
 			list: &d.features, watch: &d.runtime, options: func() []choice { return featureChoices(d, a) },
 		}}},
 		{title: step(6, "Application"), hide: func() bool { return !d.compose() }, qs: composeQuestions(d, a, f)},
-		{title: step(6, "Application"), hide: func() bool { return d.compose() }, qs: []question{
+		{title: step(6, "Application"), hide: func() bool { return !d.php() }, qs: []question{
+			input("PHP version", "The version of the CloudPanel site and of php<version> on the server, such as 8.2.", &d.phpVersion, func(s string) error {
+				if !phpVersionPattern.MatchString(strings.TrimSpace(s)) {
+					return errors.New("a version such as 8.2")
+				}
+				return nil
+			}),
+			input("Health page", "Fetched through the site's backend after the switch; a failure rolls back.", &d.health, nil),
+			input("Build image", "Optional. A Docker image to build in (PHP, composer, node, yarn inside); empty builds on this machine.", &d.buildImage, nil),
+		}},
+		{title: step(6, "Application"), hide: func() bool { return d.compose() || d.php() }, qs: []question{
 			input("Health page", "Fetched on the server after the switch; a failure rolls back.", &d.health, nil),
 			input("Smoke test pages", "Comma separated; fetched from the local release before anything is uploaded.", &d.smoke, nil),
 		}},

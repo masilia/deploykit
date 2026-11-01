@@ -24,7 +24,7 @@ type answerFlags struct {
 	path, tlsMode                       string
 	sshPort, appPort, proxyPort         int
 	composeFile, appService, migrate    string
-	healthPath                          string
+	healthPath, phpVersion, buildImage  string
 	dockerfiles                         []string
 	yes, force                          bool
 }
@@ -40,6 +40,8 @@ func (f *answerFlags) register(cmd *cobra.Command, withProject bool) {
 		fl.StringVar(&f.appService, "app-service", "", "compose: service the app commands run in")
 		fl.StringVar(&f.migrate, "migrate", "", "compose: migration command, run in a one-off container of the app service")
 		fl.StringVar(&f.healthPath, "health-path", "", "page checked after a deploy (default /)")
+		fl.StringVar(&f.phpVersion, "php-version", "", "php-fpm: the PHP version of the site, such as 8.2 (default: from composer.json)")
+		fl.StringVar(&f.buildImage, "build-image", "", "php-fpm: build in a throwaway container of this Docker image instead of on this machine")
 		fl.StringArrayVar(&f.dockerfiles, "dockerfile", nil, "compose: a Dockerfile to build as an image (repeatable; default: detected)")
 	}
 	fl.StringVar(&f.id, "id", "", "target id, the file targets/<id>.env (default: prod)")
@@ -72,6 +74,8 @@ func (f *answerFlags) override(cmd *cobra.Command, a *scaffold.Answers) {
 	str("runtime", &a.Runtime, f.runtime)
 	str("ingress", &a.Ingress, f.ingress)
 	str("health-path", &a.HealthPath, f.healthPath)
+	str("php-version", &a.PHPVersion, f.phpVersion)
+	str("build-image", &a.BuildImage, f.buildImage)
 	str("app-service", &a.AppService, f.appService)
 	str("migrate", &a.MigrateCommand, f.migrate)
 	str("id", &a.Target.ID, f.id)
@@ -177,6 +181,9 @@ func (a *app) runInit(cmd *cobra.Command, f *answerFlags) error {
 	ask := a.canAsk(f)
 	opts := a.formOptions(f, finds)
 
+	if ans.Full && !ask {
+		_, _ = fmt.Fprintln(a.out, st.Caution("this project uses %s: the native CloudPanel profile below is for a simple installation (legacy search, files); full dependencies fit a Docker stack", strings.Join(ans.FullReasons, ", ")))
+	}
 	if ask {
 		_, _ = fmt.Fprint(a.out, st.Banner("deploykit init", "Create the configuration of this project in "+dir))
 		if err := scaffold.RunInitForm(opts, &ans); err != nil {
@@ -277,20 +284,23 @@ func (a *app) resolveConflicts(f *answerFlags, plan *scaffold.Plan, ask bool, op
 func (a *app) review(st *ui.Styles, ans scaffold.Answers, plan *scaffold.Plan) string {
 	t := ans.Target
 	where := t.SSHUser + "@" + t.Host
-	if ans.Runtime == scaffold.RuntimePM2 {
+	if ans.Runtime == scaffold.RuntimePM2 || ans.Runtime == scaffold.RuntimePHP {
 		where = t.SiteUser + "@" + t.Host
 	}
 	rows := [][2]string{
 		{"Project", ans.Project},
-		{"Runtime", map[string]string{scaffold.RuntimePM2: "Next.js on pm2", scaffold.RuntimeCompose: "Docker Compose"}[ans.Runtime]},
+		{"Runtime", map[string]string{scaffold.RuntimePM2: "Next.js on pm2", scaffold.RuntimeCompose: "Docker Compose", scaffold.RuntimePHP: "PHP-FPM (" + ans.Framework + ", PHP " + ans.PHPVersion + ")"}[ans.Runtime]},
 		{"Ingress", ans.Ingress},
 		{"Target", fmt.Sprintf("%s  (%s:%d)", t.ID, where, t.SSHPort)},
 		{"Domain", orNone(t.Domain)},
 		{"Path", t.Path},
 		{"Features", orNone(strings.Join(ans.Features, ", "))},
 	}
-	if ans.Runtime == scaffold.RuntimePM2 {
+	switch ans.Runtime {
+	case scaffold.RuntimePM2:
 		rows[2][1] = "CloudPanel Node.js site"
+	case scaffold.RuntimePHP:
+		rows[2][1] = "CloudPanel PHP site"
 	}
 	body := st.Rows(rows) + "\n"
 	for _, f := range plan.Files {
@@ -328,7 +338,10 @@ func (a *app) afterWrite(st *ui.Styles, dir string, ans scaffold.Answers) {
 	if ans.Target.UsesCloudPanel(ans.Runtime, ans.Ingress) {
 		next = append(next, [2]string{"deploykit bootstrap -t " + ans.Target.ID, "once: creates the CloudPanel site"})
 	}
-	if ans.Runtime == scaffold.RuntimePM2 {
+	if ans.Runtime == scaffold.RuntimePHP {
+		next = append(next, [2]string{"create " + ans.Target.Path + "/shared/.env.local", "on the server, mode 600: the secrets (DATABASE_URL, APP_SECRET…), deploys refuse to run without it"})
+	}
+	if ans.Runtime == scaffold.RuntimePM2 || ans.Runtime == scaffold.RuntimePHP {
 		next = append(next, [2]string{"deploykit deploy -t " + ans.Target.ID + " --dry-run", "the plan, nothing is changed"})
 	} else {
 		next = append(next, [2]string{"deploykit deploy -t " + ans.Target.ID + " --install --version X.Y.Z --dry-run", "the plan, nothing is changed"})
@@ -469,7 +482,7 @@ func relInventory(p *project, id string) string {
 // ingressOf reads the ingress mode of a manifest: select, or the type of its only ingress.
 func ingressOf(m *manifest.Manifest) string {
 	switch {
-	case m.Runtime.Type == manifest.RuntimePM2:
+	case m.ReleaseBased():
 		return scaffold.IngressCloudPanel
 	case m.Ingress.Select != "":
 		return scaffold.IngressSelect

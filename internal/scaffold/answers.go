@@ -16,6 +16,7 @@ import (
 const (
 	RuntimePM2     = "pm2"
 	RuntimeCompose = "compose"
+	RuntimePHP     = "php-fpm"
 
 	IngressCloudPanel = "cloudpanel"
 	IngressStandalone = "standalone"
@@ -54,6 +55,16 @@ type ImageRef struct {
 	Dockerfile string
 }
 
+// NamedCommand is a command of runtime.commands.
+type NamedCommand struct{ Name, Run string }
+
+// SharedFile is an entry of runtime.shared.
+type SharedFile struct {
+	Path     string
+	Kind     string // file or dir
+	Required bool
+}
+
 // Answers is everything the generators need. The form fills it; flags fill it for scripts.
 type Answers struct {
 	Project  string
@@ -80,6 +91,20 @@ type Answers struct {
 	Volumes        []string
 	EnvTemplate    string // optional .env template in the repository, copied on first install
 	SyncDirs       []string
+
+	// php-fpm
+	PHPVersion string
+	WebRoot    string
+	Workdir    string // the folder of the repository holding the application ("" when it is the root)
+	BuildImage string // optional: build in a container of this image
+	Framework  string // ibexa, symfony or php
+	Encore     bool
+	Commands   []NamedCommand // runtime.commands, in order
+	Prepare    []string       // names run before the switch
+	Shared     []SharedFile
+	// Full and FullReasons say that the project uses Redis, Solr or Varnish: shown to the user, not written to the manifest.
+	Full        bool
+	FullReasons []string
 
 	// HealthPath is the page checked after a deploy (pm2: on the server; compose: through the proxy).
 	HealthPath string
@@ -128,6 +153,26 @@ func DefaultAnswers(f Findings) Answers {
 			a.Features = []string{FeatBackup, FeatRestoreTest, FeatMonitor}
 		}
 		a.Target = Target{SSHPort: 22, SSHUser: "deploy", ProxyPort: 8081}
+	case KindPHP:
+		a.Runtime = RuntimePHP
+		a.Ingress = IngressCloudPanel
+		a.PHPVersion, a.WebRoot, a.Workdir = f.PHPVersion, "public", f.PHPDir
+		if a.PHPVersion == "" {
+			a.PHPVersion = "8.3"
+		}
+		a.Framework, a.Encore, a.Full, a.FullReasons = f.Framework, f.Encore, f.Full, f.FullReasons
+		a.Shared = []SharedFile{{".env.local", "file", true}, {"var/log", "dir", false}, {"var/sessions", "dir", false}}
+		if f.Framework == "ibexa" {
+			a.Shared = append(a.Shared, SharedFile{"public/var", "dir", false}, SharedFile{"config/jwt", "dir", false})
+		}
+		a.Commands = []NamedCommand{{"warmup", "{{ php }} bin/console cache:warmup"}}
+		a.Prepare = []string{"warmup"}
+		for _, c := range f.Console {
+			name, run := consoleCommand(c)
+			a.Commands = append(a.Commands, NamedCommand{name, run})
+			a.Prepare = append(a.Prepare, name)
+		}
+		a.Target = Target{SSHPort: 22}
 	default: // pm2, and the starting point when nothing was recognised
 		a.Runtime = RuntimePM2
 		a.Ingress = IngressCloudPanel
@@ -158,6 +203,9 @@ func FillDefaults(a *Answers) {
 	if a.Keep == 0 {
 		a.Keep = 3
 	}
+	if a.Runtime == RuntimePHP && a.WebRoot == "" {
+		a.WebRoot = "public"
+	}
 	if a.Runtime == RuntimeCompose {
 		if t.SSHUser == "" {
 			t.SSHUser = "deploy"
@@ -168,7 +216,7 @@ func FillDefaults(a *Answers) {
 		if t.ProxyPort == 0 {
 			t.ProxyPort = 8081
 		}
-	} else if t.AppPort == 0 {
+	} else if a.Runtime == RuntimePM2 && t.AppPort == 0 {
 		t.AppPort = 3001
 	}
 	if a.UsesCloudPanel() && t.SiteUser == "" {
@@ -182,6 +230,44 @@ func FillDefaults(a *Answers) {
 			t.Path = "/home/" + t.SiteUser + "/htdocs/" + t.Domain
 		}
 	}
+}
+
+// consoleCommand names a detected console command and gives its command line.
+func consoleCommand(c string) (name, run string) {
+	switch c {
+	case "kaliop:migration:migrate":
+		return "migrate", "{{ php }} -d memory_limit=512M bin/console kaliop:migration:migrate --no-interaction"
+	case "doctrine:migrations:migrate":
+		return "doctrine-migrate", "{{ php }} bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration"
+	case "ibexa:graphql:generate-schema":
+		return "graphql", "{{ php }} bin/console ibexa:graphql:generate-schema"
+	}
+	return strings.ReplaceAll(c, ":", "-"), "{{ php }} bin/console " + c
+}
+
+// AssetCommands are the build commands that compile the front-end assets of a PHP project.
+func (a Answers) AssetCommands() []string {
+	if !a.Encore {
+		return nil
+	}
+	if a.Framework == "ibexa" {
+		return []string{
+			"corepack yarn install --frozen-lockfile",
+			"php bin/console assets:install public",
+			"php bin/console ibexa:encore:compile --config-name app",
+			"php bin/console ibexa:encore:compile",
+			"php bin/console bazinga:js-translation:dump public/assets --merge-domains",
+		}
+	}
+	return []string{"corepack yarn install --frozen-lockfile", "corepack yarn encore production"}
+}
+
+// AssembleFrom is what the release is assembled from: the application folder of the export.
+func (a Answers) AssembleFrom() string {
+	if a.Workdir == "" {
+		return "."
+	}
+	return a.Workdir + "/."
 }
 
 // ImageName derives an image name from a Dockerfile path: docker/Dockerfile.api → api, Dockerfile → app.
@@ -213,15 +299,16 @@ func nodeChecks(f Findings) []string {
 }
 
 var (
-	hostPattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
-	userPattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
-	pathPattern = regexp.MustCompile(`^/[A-Za-z0-9._/@+-]*$`)
+	phpVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+$`)
+	hostPattern       = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
+	userPattern       = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
+	pathPattern       = regexp.MustCompile(`^/[A-Za-z0-9._/@+-]*$`)
 )
 
 // UsesCloudPanel reports whether this target runs behind CloudPanel: always for pm2, by ingress for compose, and by the
 // target's own TLS mode when the manifest lets each target choose.
 func (t Target) UsesCloudPanel(runtime, ingress string) bool {
-	return runtime == RuntimePM2 || ingress == IngressCloudPanel || (ingress == IngressSelect && t.TLSMode != "certbot")
+	return runtime == RuntimePM2 || runtime == RuntimePHP || ingress == IngressCloudPanel || (ingress == IngressSelect && t.TLSMode != "certbot")
 }
 
 // UsesCloudPanel reports the same for the first target of these answers.
@@ -278,6 +365,22 @@ func (a Answers) Validate() error {
 		add("project %q must use lower-case letters, digits, '.', '_' and '-'", a.Project)
 	}
 	switch a.Runtime {
+	case RuntimePHP:
+		if a.Ingress != IngressCloudPanel {
+			add("a php-fpm site runs behind CloudPanel: ingress must be cloudpanel, got %q", a.Ingress)
+		}
+		if !phpVersionPattern.MatchString(a.PHPVersion) {
+			add("php version %q must look like 8.2", a.PHPVersion)
+		}
+		if a.WebRoot == "" || strings.HasPrefix(a.WebRoot, "/") || strings.Contains(a.WebRoot, "..") {
+			add("web root %q must be a folder inside the application", a.WebRoot)
+		}
+		if strings.HasPrefix(a.Workdir, "/") || strings.Contains(a.Workdir, "..") {
+			add("workdir %q must be a folder inside the repository", a.Workdir)
+		}
+		if !strings.HasPrefix(a.HealthPath, "/") {
+			add("health path %q must start with /", a.HealthPath)
+		}
 	case RuntimePM2:
 		if a.Ingress != IngressCloudPanel {
 			add("a pm2 site runs behind CloudPanel: ingress must be cloudpanel, got %q", a.Ingress)
@@ -335,13 +438,15 @@ func (t Target) EnvFile(runtime, ingress string) string {
 	kv("HOST", t.Host)
 	kv("SSH_PORT", strconv.Itoa(t.SSHPort))
 	switch runtime {
-	case RuntimePM2:
+	case RuntimePM2, RuntimePHP:
 		kv("ROOT_USER", "root")
 		kv("SITE_USER", t.SiteUser)
 		kv("DOMAIN", t.Domain)
 		kv("PATH_ON_SERVER", t.Path)
-		kv("APP_PORT", strconv.Itoa(t.AppPort))
-		kv("SITE_URL", "https://"+t.Domain)
+		if runtime == RuntimePM2 {
+			kv("APP_PORT", strconv.Itoa(t.AppPort))
+			kv("SITE_URL", "https://"+t.Domain)
+		}
 	default:
 		kv("SSH_USER", t.SSHUser)
 		if t.UsesCloudPanel(runtime, ingress) {

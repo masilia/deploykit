@@ -234,3 +234,56 @@ func TestTargetAddAsksOnlyAboutTheServer(t *testing.T) {
 		t.Errorf("a standalone target needs no CloudPanel keys:\n%s", body)
 	}
 }
+
+const ibexaComposer = `{"name":"ibexa/oss-skeleton","require":{"php":">=8.2","ibexa/oss":"4.6.13","ibexa/graphql":"4.6.*","symfony/framework-bundle":"5.4.*","tanoconsulting/ibexa-migration-bundle":"^1.0","ext-intl":"*"}}`
+
+func ibexaRepo() map[string]string {
+	return map[string]string{
+		"ibexa/composer.json":                               ibexaComposer,
+		"ibexa/package.json":                                `{"name":"app","scripts":{"build":"encore production"}}`,
+		"ibexa/public/index.php":                            "<?php\n",
+		"ibexa/config/packages/cache_pool/cache.redis.yaml": "services: {}\n",
+		"ibexa/config/packages/ibexa_solr.yaml":             "ibexa_solr: {}\n",
+		"conf/prod/site.vcl":                                "vcl 4.1;\n",
+		".git/config":                                       "[remote \"origin\"]\n\turl = git@github.com:acme/shop-site.git\n",
+	}
+}
+
+func TestInitRecognisesAnIbexaProject(t *testing.T) {
+	dir := repoWith(t, ibexaRepo())
+	out, err := initRun(t, dir, "", "init", "--yes", "--host", "srv.example.com", "--domain", "www.shop.example")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{"PHP-FPM (ibexa, PHP 8.2)", "CloudPanel PHP site", "Redis cache pool", "Solr", "Varnish", "shared/.env.local", "deploykit validate: ok"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	manifest, _ := os.ReadFile(filepath.Join(dir, "deploykit.yaml"))
+	for _, want := range []string{"project: shop-site", "workdir: ibexa", "php_version: \"8.2\"", "ibexa:encore:compile", "HTTPCACHE_PURGE_TYPE", "kaliop:migration:migrate",
+		"ibexa:graphql:generate-schema", "prepare: [warmup, graphql, migrate]", "public/var", "config/jwt", "from: ibexa/."} {
+		if !strings.Contains(string(manifest), want) {
+			t.Errorf("manifest lacks %q:\n%s", want, manifest)
+		}
+	}
+	target, _ := os.ReadFile(filepath.Join(dir, "targets/prod.env"))
+	if strings.Contains(string(target), "APP_PORT") || !strings.Contains(string(target), "SITE_USER=shop") || !strings.Contains(string(target), "PATH_ON_SERVER=/home/shop/htdocs/www.shop.example") {
+		t.Errorf("a php target has no app port:\n%s", target)
+	}
+	if out, err = initRun(t, dir, "", "validate"); err != nil || !strings.Contains(out, "runtime php-fpm") {
+		t.Errorf("validate: %v\n%s", err, out)
+	}
+}
+
+func TestInitPHPAcceptsAVersionAndABuildImage(t *testing.T) {
+	dir := repoWith(t, ibexaRepo())
+	if out, err := initRun(t, dir, "", "init", "--yes", "--host", "srv.example.com", "--domain", "www.shop.example",
+		"--php-version", "8.3", "--build-image", "ddev/ddev-webserver:v1.25.4"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	manifest, _ := os.ReadFile(filepath.Join(dir, "deploykit.yaml"))
+	if !strings.Contains(string(manifest), "php_version: \"8.3\"") || !strings.Contains(string(manifest), `image: "ddev/ddev-webserver:v1.25.4"`) {
+		t.Errorf("manifest:\n%s", manifest)
+	}
+}

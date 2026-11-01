@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -132,5 +133,47 @@ func TestGuessRole(t *testing.T) {
 		if got := GuessRole(c.name, c.image); got != c.want {
 			t.Errorf("GuessRole(%q, %q) = %q, want %q", c.name, c.image, got, c.want)
 		}
+	}
+}
+
+func TestDetectsAnIbexaProjectInASubfolder(t *testing.T) {
+	dir := files(t, map[string]string{
+		"ibexa/composer.json":                               `{"name":"ibexa/oss-skeleton","require":{"php":">=8.2","ibexa/oss":"4.6.13","ibexa/graphql":"4.6.*","tanoconsulting/ibexa-migration-bundle":"^1.0","doctrine/doctrine-migrations-bundle":"^3"}}`,
+		"ibexa/package.json":                                `{"name":"x"}`,
+		"ibexa/public/index.php":                            "<?php\n",
+		"ibexa/config/packages/cache_pool/cache.redis.yaml": "services: {}\n",
+		"ibexa/config/packages/ibexa_solr.yaml":             "ibexa_solr: {}\n",
+		"conf/prod/site.vcl":                                "vcl 4.1;\n",
+		".git/config":                                       "[remote \"origin\"]\n\turl = git@github.com:acme/Civil-Site.git\n",
+	})
+	f := Detect(dir)
+	if f.Kind != KindPHP || f.PHPDir != "ibexa" || f.Framework != "ibexa" || f.PHPVersion != "8.2" || !f.Encore || f.Name != "civil-site" {
+		t.Errorf("findings = %+v", f)
+	}
+	if strings.Join(f.Console, ",") != "doctrine:migrations:migrate,ibexa:graphql:generate-schema,kaliop:migration:migrate" {
+		t.Errorf("console = %v", f.Console)
+	}
+	if !f.Full || len(f.FullReasons) != 3 {
+		t.Errorf("a project with Redis, Solr and Varnish needs the full stack: %v %v", f.Full, f.FullReasons)
+	}
+}
+
+func TestASimpleSymfonyProjectIsNotFull(t *testing.T) {
+	dir := files(t, map[string]string{
+		"composer.json":    `{"name":"acme/site","require":{"php":"^8.1","symfony/framework-bundle":"6.4.*"}}`,
+		"public/index.php": "<?php\n",
+	})
+	f := Detect(dir)
+	if f.Kind != KindPHP || f.PHPDir != "" || f.Framework != "symfony" || f.PHPVersion != "8.1" || f.Full || f.Encore {
+		t.Errorf("findings = %+v", f)
+	}
+}
+
+func TestAComposeProjectStaysCompose(t *testing.T) {
+	dir := files(t, map[string]string{
+		"docker-compose.prod.yml": composeProd, "composer.json": `{"require":{"php":">=8.2"}}`, "public/index.php": "<?php\n",
+	})
+	if f := Detect(dir); f.Kind != KindCompose {
+		t.Errorf("Kind = %q", f.Kind)
 	}
 }

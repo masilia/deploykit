@@ -21,6 +21,7 @@ const (
 	KindNone    Kind = ""
 	KindNode    Kind = "pm2"     // a Node.js application run by pm2 (Next.js standalone)
 	KindCompose Kind = "compose" // a Docker Compose stack
+	KindPHP     Kind = "php-fpm" // a PHP application (Symfony, Ibexa) served by PHP-FPM
 )
 
 // Service is one service of a compose file with the role deploykit would give it.
@@ -50,6 +51,17 @@ type Findings struct {
 	Dockerfiles  []string
 	EnvTemplate  string // an example .env found in the repository
 
+	// PHP projects
+	PHPDir     string   // the folder holding composer.json, relative to the repository ("" or "ibexa")
+	Framework  string   // ibexa, symfony or php
+	PHPVersion string   // from the php constraint of composer.json, "8.2" for ">=8.2"
+	Encore     bool     // webpack Encore assets to compile
+	Console    []string // console commands a deploy usually runs, derived from the packages (migrations, graphql)
+	// Full is true when the project uses services a CloudPanel PHP site does not provide (Redis, Solr, Varnish): a Docker
+	// stack is the better fit. FullReasons says what was seen.
+	Full        bool
+	FullReasons []string
+
 	pkgName, composeName string // name hints, used by suggestName
 }
 
@@ -75,6 +87,7 @@ func Detect(dir string) Findings {
 	f.GitRemote = gitRemote(dir)
 	node := detectNode(dir, &f)
 	compose := detectCompose(dir, &f)
+	php := detectPHP(dir, &f)
 	f.Dockerfiles = dockerfiles(dir)
 	for _, c := range []string{"deployment/.env.example", ".env.example", ".env.prod.example", ".env.production.example"} {
 		if _, err := os.Stat(filepath.Join(dir, c)); err == nil {
@@ -89,6 +102,8 @@ func Detect(dir string) Findings {
 		if node {
 			f.Also = KindNode
 		}
+	case php:
+		f.Kind = KindPHP
 	case node:
 		f.Kind = KindNode
 	}

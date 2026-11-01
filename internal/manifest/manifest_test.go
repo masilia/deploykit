@@ -5,10 +5,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestExamplesLoad(t *testing.T) {
-	for _, name := range []string{"compose-app", "nextjs-cloudpanel", "php-cloudpanel"} {
+	for _, name := range []string{"compose-app", "nextjs-cloudpanel", "php-ibexa"} {
 		t.Run(name, func(t *testing.T) {
 			m, err := Load(filepath.Join("..", "..", "examples", name, "deploykit.yaml"))
 			if err != nil {
@@ -240,5 +242,59 @@ func TestYAMLSyntaxErrorsAreReportedAsSuch(t *testing.T) {
 	_, err := Parse([]byte("version: 1\nproject: [unclosed\n"))
 	if err == nil || strings.Contains(err.Error(), "must be 1") {
 		t.Errorf("err = %v; a syntax error must not be reported as missing fields", err)
+	}
+}
+
+func TestPHPIbexaExampleTypedSections(t *testing.T) {
+	m, err := Load(filepath.Join("..", "..", "examples", "php-ibexa", "deploykit.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	php, err := m.PHP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if php.PHPVersion != "8.2" || php.WebRoot != "public" || php.Reload != "none" || php.PHPExtensions != "auto" {
+		t.Errorf("runtime = %+v", php)
+	}
+	if len(php.Shared) != 5 || !php.Shared[0].Required || php.Shared[0].Kind != "file" || php.Shared[1].Kind != "dir" {
+		t.Errorf("shared = %+v", php.Shared)
+	}
+	if strings.Join(php.Prepare, ",") != "warmup,migrate,graphql" || php.Health.Backend != "127.0.0.1:8080" || len(php.Health.Expect) != 3 {
+		t.Errorf("prepare %v, health %+v", php.Prepare, php.Health)
+	}
+	rd, err := m.ReleaseDir()
+	if err != nil || rd.Build.Workdir != "ibexa" || !strings.Contains(rd.Build.Command, "ibexa:encore:compile") {
+		t.Errorf("release dir: %+v, %v", rd.Build, err)
+	}
+	var cp CloudPanel
+	if err := m.Ingress.Decode(&cp); err != nil {
+		t.Fatal(err)
+	}
+	if cp.Site.Type != "php" || cp.Site.VhostTemplate.Name != "deploykit-{{ project }}" || cp.Site.VhostTemplate.Base != "Symfony 7" {
+		t.Errorf("site = %+v", cp.Site)
+	}
+}
+
+func TestVhostTemplateIsAStringOrAMapping(t *testing.T) {
+	for in, want := range map[string]VhostTemplateRef{
+		"vhost_template: Generic":                           {Name: "Generic"},
+		"vhost_template: { name: custom, base: Symfony 7 }": {Name: "custom", Base: "Symfony 7"},
+	} {
+		var out struct {
+			V VhostTemplateRef `yaml:"vhost_template"`
+		}
+		if err := yaml.Unmarshal([]byte(in), &out); err != nil || out.V != want {
+			t.Errorf("%q: got %+v, %v", in, out.V, err)
+		}
+	}
+	var bad struct {
+		V VhostTemplateRef `yaml:"vhost_template"`
+	}
+	if err := yaml.Unmarshal([]byte("vhost_template: { name: x, color: red }"), &bad); err == nil {
+		t.Error("an unknown key must be refused")
 	}
 }

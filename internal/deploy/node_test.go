@@ -51,6 +51,11 @@ type fixture struct {
 }
 
 func newFixture(t *testing.T, manifestYAML string) *fixture {
+	return newFixtureWith(t, manifestYAML, nil)
+}
+
+// newFixtureWith also commits the extra files (path → content) into the project repository.
+func newFixtureWith(t *testing.T, manifestYAML string, extra map[string]string) *fixture {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -62,11 +67,20 @@ func newFixture(t *testing.T, manifestYAML string) *fixture {
 	if err := os.WriteFile(filepath.Join(repo, "app.txt"), []byte("app"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	for rel, body := range extra {
+		p := filepath.Join(repo, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	runIn(t, repo, "git", "add", ".")
 	runIn(t, repo, "git", "-c", "user.email=t@example.com", "-c", "user.name=T", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "initial commit")
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "demo.env"), []byte("PATH_ON_SERVER=/home/demo/htdocs/demo.example\nAPP_PORT=3001\nSITE_URL=https://demo.example\nHOST=h\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "demo.env"), []byte("PATH_ON_SERVER=/home/demo/htdocs/demo.example\nAPP_PORT=3001\nSITE_URL=https://demo.example\nDOMAIN=demo.example\nHOST=h\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	target, err := inventory.Open(dir, "demo", nil)

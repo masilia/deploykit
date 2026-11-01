@@ -9,7 +9,7 @@ SSH, with [CloudPanel](https://www.cloudpanel.io/)'s `clpctl` doing the site pro
 | Next.js / Node | release folder (rsync) | pm2 | CloudPanel Node.js site | validated on a real server |
 | Docker stack behind CloudPanel | registry image | Docker Compose | CloudPanel reverse-proxy site | validated on a real server |
 | Docker stack, standalone server | registry image | Docker Compose | own nginx + certbot | written, **not run on a real host** |
-| PHP | release folder (rsync) | PHP-FPM | CloudPanel PHP site | not built |
+| PHP (Symfony, Ibexa), simple installation | release folder (rsync) | PHP-FPM | CloudPanel PHP site | written, tested with fakes and a real build; **not yet run on a server** |
 
 ## Install
 
@@ -56,7 +56,7 @@ the Dockerfiles it found, and lets you choose the sections you want (backups, re
 checks, smoke test). It never overwrites a file without asking. Without a terminal, give the answers as flags:
 `deploykit init --yes --host srv.example.com --domain www.example.com`. `--plain` replaces the full-screen form by line
 prompts. The generated files are documented by the examples in [`examples/`](examples/): `nextjs-cloudpanel`,
-`compose-app` (every section), `php-cloudpanel` (a hypothesis).
+`compose-app` (every section), `php-ibexa` (an Ibexa 4.6 site: legacy search, files, no Redis/Solr/Varnish).
 
 ## What it looks like
 
@@ -74,6 +74,7 @@ query that the terminal library sends at start-up, `TERM=dumb` skips it.
 | `validate`, `doctor` | check the manifest and the targets; check the tools needed here and on the server |
 | `bootstrap`, `deploy`, `rollback`, `status` | provision a site once; deploy; go back (`rollback` is pm2; for Compose deploy an older `--version`); show the live release or version |
 | `release` | build the images from a git tag and push them (`deploy` does it when they are missing) |
+| `run <command>` | php-fpm: run a named command of `runtime.commands` in the live release (clear a cache, reindex…); `deploy --also <command>` runs one after a deploy |
 | `healthcheck`, `fleet …` | health probes of a target; status, health, backups and ordered deploys across targets |
 | `server update\|install\|backup\|monitor\|restore-test\|renew-certs\|cron\|crons` | run on the server by `deploy` and by cron; not meant to be typed by hand |
 

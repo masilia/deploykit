@@ -182,6 +182,12 @@ func Parse(data []byte) (*Manifest, error) {
 	return &m, nil
 }
 
+// ReleaseBased reports a runtime served from release folders behind a CloudPanel site (pm2, php-fpm): they share the
+// deploy, rollback and status flows. compose has its own.
+func (m *Manifest) ReleaseBased() bool {
+	return m.Runtime.Type == RuntimePM2 || m.Runtime.Type == RuntimePHPFPM
+}
+
 // Path is the file the manifest was loaded from, if any.
 func (m *Manifest) Path() string { return m.path }
 
@@ -250,6 +256,14 @@ func (m *Manifest) Validate() error {
 	}
 	if m.Runtime.Type == RuntimePM2 {
 		if _, err := m.PM2(); err != nil {
+			add("runtime: %v", err)
+		}
+	}
+	if m.Runtime.Type == RuntimePHPFPM {
+		if m.Artifact.Type != ArtifactReleaseDir {
+			add("runtime php-fpm needs artifact release-dir, got %s", m.Artifact.Type)
+		}
+		if _, err := m.PHP(); err != nil {
 			add("runtime: %v", err)
 		}
 	}

@@ -208,3 +208,46 @@ func TestTargetFiles(t *testing.T) {
 		t.Errorf("a CloudPanel target needs its proxy port and site user:\n%s", body)
 	}
 }
+
+func phpAnswers(t *testing.T) Answers {
+	t.Helper()
+	dir := files(t, map[string]string{
+		"app/composer.json":    `{"name":"x/y","require":{"php":">=8.2","ibexa/oss":"4.6.13","tanoconsulting/ibexa-migration-bundle":"^1","ibexa/graphql":"*"}}`,
+		"app/package.json":     `{"name":"x"}`,
+		"app/public/index.php": "<?php\n",
+	})
+	a := DefaultAnswers(Detect(dir))
+	a.Target.ID, a.Target.Host, a.Target.Domain = "prod", "srv.example.com", "www.example.com"
+	FillDefaults(&a)
+	return a
+}
+
+func TestPHPManifestIsValidAndReadable(t *testing.T) {
+	a := phpAnswers(t)
+	m, dir := check(t, a)
+	php, err := m.PHP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if php.PHPVersion != "8.2" || strings.Join(php.Prepare, ",") != "warmup,graphql,migrate" || len(php.Shared) != 5 {
+		t.Errorf("php = %+v", php)
+	}
+	rd, err := m.ReleaseDir()
+	if err != nil || rd.Build.Workdir != "app" || !strings.Contains(rd.Build.Command, "ibexa:encore:compile") {
+		t.Errorf("release dir = %+v, %v", rd.Build, err)
+	}
+	target, _ := os.ReadFile(filepath.Join(dir, "targets/prod.env"))
+	if strings.Contains(string(target), "APP_PORT") || !strings.Contains(string(target), "PATH_ON_SERVER=/home/example/htdocs/www.example.com") {
+		t.Errorf("target:\n%s", target)
+	}
+}
+
+func TestPHPWithAContainerBuildAndWithoutAssets(t *testing.T) {
+	a := phpAnswers(t)
+	a.BuildImage, a.Encore, a.Framework = "ddev/ddev-webserver:v1.25.4", false, "symfony"
+	m, _ := check(t, a)
+	rd, _ := m.ReleaseDir()
+	if rd.Build.Image != "ddev/ddev-webserver:v1.25.4" || rd.Build.Command != "" {
+		t.Errorf("build = %+v", rd.Build)
+	}
+}

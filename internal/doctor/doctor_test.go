@@ -89,6 +89,19 @@ func TestToolSetsFollowTheManifest(t *testing.T) {
 	if got := names(ServerTools(compose, false)); got != "curl,docker,docker compose,gpg,crontab" {
 		t.Errorf("compose server = %s", got)
 	}
+	php, err := manifest.Load("../../examples/php-ibexa/deploykit.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(LocalTools(php)); got != "git,ssh,rsync,php,composer,node,yarn" {
+		t.Errorf("php local = %s", got)
+	}
+	if got := names(ServerTools(php, false)); got != "curl,php8.2,rsync" {
+		t.Errorf("php site = %s", got)
+	}
+	if got := names(ServerTools(php, true)); got != "curl,clpctl" {
+		t.Errorf("php root = %s", got)
+	}
 }
 
 func TestLoginFailureIsNotReportedAsAMissingTool(t *testing.T) {

@@ -105,3 +105,25 @@ func TestRunBuildStepStreamsOutputAndPropagatesFailure(t *testing.T) {
 		t.Error("a failing build command must fail")
 	}
 }
+
+func TestBuildStepInAContainerPassesTheEnvironmentByName(t *testing.T) {
+	f := transport.NewFake("local")
+	step := BuildStep{Name: "build", Command: "composer install\nyarn build"}
+	err := RunBuildStepInContainer(t.Context(), f, "ddev/ddev-webserver:v1.25.4", "/tmp/export", "ibexa", step,
+		map[string]string{"APP_ENV": "prod", "TOKEN": "s3cret"}, 1000, 1001, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := f.Trace()
+	for _, want := range []string{
+		"docker run --rm -i --user 1000:1001 -v /tmp/export:/work -w /work/ibexa -e HOME=/tmp -e APP_ENV -e TOKEN ddev/ddev-webserver:v1.25.4 sh -s",
+		"env APP_ENV=prod",
+	} {
+		if !strings.Contains(trace, want) {
+			t.Errorf("trace lacks %q:\n%s", want, trace)
+		}
+	}
+	if strings.Contains(strings.Split(trace, "\n")[0], "s3cret") {
+		t.Errorf("a value must never be in the argument list:\n%s", trace)
+	}
+}

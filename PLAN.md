@@ -131,7 +131,7 @@ ingress has not run on a real host.**
 | 3 Node + pm2 | Done and validated on a real server: `bootstrap`, `deploy` (clean export, build, assemble, local smoke test, lock, atomic switch, health, automatic rollback, pruning), `rollback`, `status`. Rollback, pruning and hard links confirmed |
 | 4 Compose read-only | Done; `status`, `healthcheck`, `fleet status|backups` validated on a real pilot. `release` (image from a tag) used for real releases |
 | 5 Compose server | Done: `server update` (lock, disk, backup, migrate, restart, verify, automatic rollback), `install` (standalone and CloudPanel ingress), `backup` (real gpg end to end), `monitor`, `restore-test`, `renew-certs`, `cron`, `crons`. `backup`, `restore-test`, `monitor`, `update` (with rollback) and `install` behind CloudPanel validated on a real host; the standalone ingress and `renew-certs` are not |
-| 6 PHP | Not started: the PHP manifest is a hypothesis and there is no reference script (open question 2) |
+| 6 PHP | php-fpm runtime written (ADR 0009): release folders, shared links, named commands, derived vhost template, `run`, `init`. Reference project: an Ibexa 4.6 site, whose release builds for real in a container (422 MB). Not yet run on a server. Full dependencies (Redis, Solr, Varnish) are the Docker stack, not this runtime |
 | 7 Orchestration | Partly: `deploy --version/--rollback/--install/--env` and `fleet deploy` for compose. Not done: the interactive `setup` wizard and the Bubble Tea TUI (the plain renderer is complete) |
 | 8 Switch-over | Done for both projects: each one deploys through deploykit (a compose application with a live pilot, a Next.js site under pm2) and its old scripts are archived. Still shell by choice: the database tooling |
 
@@ -174,9 +174,9 @@ first, `.status` files instead of mtimes, one `rsync` trailing-slash rule for mi
 
 ## Remaining work
 
-`fleet status`, `healthcheck` and `deploy` work for pm2 targets too (`fleet backups` is compose-only). SSH retries are done: a connection that cannot be established is retried twice (2 s, then 4 s; `ssh.retries`, `ssh.connect_timeout`), an rsync that was interrupted is retried, and a session that breaks while a script runs is reported as such, never replayed (a script can repeat its effects).
+`fleet status`, `healthcheck` and `deploy` work for pm2 and php-fpm targets too (`fleet backups` is compose-only). SSH retries are done: a connection that cannot be established is retried twice (2 s, then 4 s; `ssh.retries`, `ssh.connect_timeout`), an rsync that was interrupted is retried, and a session that breaks while a script runs is reported as such, never replayed (a script can repeat its effects).
 
 - The standalone (certbot) ingress and `renew-certs` have not run on a real host; neither has a reboot test of the pm2 systemd unit and the crons.
-- PHP runtime (needs a reference project), PHP web root and opcache behind CloudPanel.
+- The php-fpm runtime has not run on a real server yet (the vhost template with `$realpath_root`, the switch without a reload, the shared links). The Docker stack for PHP projects with Redis, Solr and Varnish is not built.
 - The Bubble Tea TUI for deploys (the plain renderer is complete); `init` and `target add` use `huh` forms.
 - Restore from a backup (the database tooling stays a separate project).

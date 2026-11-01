@@ -9,7 +9,13 @@ type ReleaseDir struct {
 		Ref string `yaml:"ref"`
 	} `yaml:"source"`
 	Build struct {
-		Node    string            `yaml:"node"`
+		Node string `yaml:"node"`
+		// Workdir is the folder of the export the build commands run in (a project whose application lives in a
+		// subfolder). Assemble paths stay relative to the export root.
+		Workdir string `yaml:"workdir"`
+		// Image runs the build commands in a throwaway container of this Docker image instead of on this machine: the
+		// export is mounted at /work, so the build needs no PHP, composer or node installed here, only Docker.
+		Image   string            `yaml:"image"`
 		Checks  []string          `yaml:"checks"`
 		Install string            `yaml:"install"`
 		Command string            `yaml:"command"`
@@ -44,6 +50,14 @@ func (m *Manifest) ReleaseDir() (*ReleaseDir, error) {
 	}
 	if len(r.Assemble) == 0 {
 		return nil, errorf("assemble: at least one step is required")
+	}
+	if r.Build.Workdir != "" {
+		if err := relativePath("build.workdir", r.Build.Workdir); err != nil {
+			return nil, err
+		}
+	}
+	if r.Build.Image != "" && !imagePattern.MatchString(r.Build.Image) {
+		return nil, errorf("build.image: %q is not a Docker image reference", r.Build.Image)
 	}
 	return &r, nil
 }
@@ -134,15 +148,15 @@ type PasswordSpec struct {
 type CloudPanel struct {
 	Type string `yaml:"type"`
 	Site struct {
-		Type          string       `yaml:"type"`
-		NodeVersion   string       `yaml:"node_version"`
-		PHPVersion    string       `yaml:"php_version"`
-		AppPort       string       `yaml:"app_port"`
-		URL           string       `yaml:"url"`
-		User          string       `yaml:"user"`
-		UserPassword  PasswordSpec `yaml:"user_password"`
-		VhostTemplate string       `yaml:"vhost_template"`
-		WebRoot       string       `yaml:"web_root"`
+		Type          string           `yaml:"type"`
+		NodeVersion   string           `yaml:"node_version"`
+		PHPVersion    string           `yaml:"php_version"`
+		AppPort       string           `yaml:"app_port"`
+		URL           string           `yaml:"url"`
+		User          string           `yaml:"user"`
+		UserPassword  PasswordSpec     `yaml:"user_password"`
+		VhostTemplate VhostTemplateRef `yaml:"vhost_template"`
+		WebRoot       string           `yaml:"web_root"`
 	} `yaml:"site"`
 	PortDiscovery struct {
 		Listening       string `yaml:"listening"`

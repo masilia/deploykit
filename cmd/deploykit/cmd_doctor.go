@@ -32,12 +32,12 @@ func (a *app) doctorCmd() *cobra.Command {
 					return err
 				}
 				siteReport := doctor.Check(cmd.Context(), site, doctor.ServerTools(p.m, false))
-				if p.m.Runtime.Type == manifest.RuntimePM2 && doctor.AllLoginFailed(siteReport) {
+				if p.m.ReleaseBased() && doctor.AllLoginFailed(siteReport) {
 					// Before the bootstrap the site user does not exist yet: one clear line instead of one failure per tool.
 					siteReport = []doctor.Result{{Where: site.Describe(), Name: "site user", Level: doctor.Warn, Detail: "cannot log in yet: run `deploykit bootstrap` (it creates the user and installs your key)"}}
 				}
 				report = append(report, siteReport...)
-				if p.m.Runtime.Type == manifest.RuntimePM2 || p.m.Ingress.Type == manifest.IngressCloudPanel || p.m.Ingress.Select != "" {
+				if p.m.ReleaseBased() || p.m.Ingress.Type == manifest.IngressCloudPanel || p.m.Ingress.Select != "" {
 					root, err := a.ssh(t, p.m, roleRoot)
 					if err != nil {
 						return err

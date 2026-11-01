@@ -108,6 +108,21 @@ func LocalTools(m *manifest.Manifest) []Tool {
 	}
 	switch m.Artifact.Type {
 	case manifest.ArtifactReleaseDir:
+		if rd, err := m.ReleaseDir(); err == nil && rd.Build.Image != "" {
+			// The build runs in a container: Docker is all it needs here.
+			tools = append(tools, Tool{Name: "docker", Command: "docker --version", Required: true})
+			break
+		}
+		if m.Runtime.Type == manifest.RuntimePHPFPM {
+			// A PHP release is built here: PHP and composer, and node with yarn (or corepack) for the assets.
+			tools = append(tools,
+				Tool{Name: "php", Command: "php -v | head -1", Required: true},
+				Tool{Name: "composer", Command: "composer --version 2>/dev/null | head -1", Required: true},
+				Tool{Name: "node", Command: "node -v", Required: false},
+				Tool{Name: "yarn", Command: "yarn -v 2>/dev/null || corepack yarn -v 2>/dev/null", Required: false},
+			)
+			break
+		}
 		tools = append(tools,
 			Tool{Name: "node", Command: "node -v", Required: true},
 			Tool{Name: "npm", Command: "npm -v", Required: false},
@@ -129,6 +144,16 @@ func ServerTools(m *manifest.Manifest, root bool) []Tool {
 			tools = append(tools,
 				Tool{Name: "node", Command: "node -v", Required: false}, // absent before bootstrap installs the site
 				Tool{Name: "pm2", Command: "pm2 -v", Required: false},
+				Tool{Name: "rsync", Command: "rsync --version | head -1", Required: true},
+			)
+		}
+	case manifest.RuntimePHPFPM:
+		if root {
+			tools = append(tools, Tool{Name: "clpctl", Command: "command -v clpctl", Required: true})
+		} else if php, err := m.PHP(); err == nil {
+			// Absent before the bootstrap has created the site.
+			tools = append(tools,
+				Tool{Name: "php" + php.PHPVersion, Command: "php" + php.PHPVersion + " -v | head -1", Required: false},
 				Tool{Name: "rsync", Command: "rsync --version | head -1", Required: true},
 			)
 		}

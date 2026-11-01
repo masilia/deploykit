@@ -46,8 +46,8 @@ Not needed by deploykit: the `user:*` commands (CloudPanel's own users) and `clo
 | No custom nginx directives per site | a Mercure SSE location, `client_max_body_size` | spike (phase 2): `X-Accel-Buffering: no` from the stack, a vhost edit, or one documented manual step |
 | No cron management | the backup, monitor and restore-test crons | managed by deploykit in the site user's crontab (marked block) |
 | No pm2 or systemd management | Node runtime | `pm2` as the site user; `pm2 startup` command run as root |
-| No web-root setting for PHP | `current/public` after a symlink switch | spike (phase 2): custom vhost template or fixed layout |
-| No PHP-FPM reload for a site user | opcache after a switch | spike (phase 2) |
+| No web-root option on `site:add:php` | `current/public` after a symlink switch | solved: the first line of a vhost template, `#{"rootDirectory":"current/public","phpVersion":"8.2"}`, sets it; deploykit derives such a template (below) |
+| No PHP-FPM reload for a site user | opcache after a switch | solved without a reload: the derived template passes `$realpath_root`; `reload: root-systemctl` is the fallback |
 | Passwords only as flags | secrets rule | ADR 0006 |
 
 ## Facts from the first real server (see `docs/profile-nextjs-cloudpanel.md` §8)
@@ -147,3 +147,16 @@ with the default vhost; HTTP/1.1 subscriber on :443; three updates published 1 s
 
 `client_max_body_size` needs nothing: nginx's global value is 64M and the project's inner proxy already enforces 12m.
 Writing `site.vhost_template` remains possible but is unsupported (see above) and is not needed for that application.
+
+## PHP sites (CloudPanel 6, read-only inspection of the staging server)
+
+- `clpctl vhost-template:add --name --file`: the file's **first line** is a JSON comment, `#{"rootDirectory":"public","phpVersion":"8.4"}`, that
+  prefills the site wizard and sets the root: `/home/<user>/htdocs/<domain>/<rootDirectory>`. `site:add:php` itself has no root option,
+  so a custom template is the way to a root of `current/public`. `clpctl vhost-template:view --name "Symfony 7"` prints the body of a
+  system template (without that first line), which deploykit reads and rewrites (`cloudpanel.PHPTemplate`).
+- The vhost of a PHP site is nginx :443 (with `{{varnish_proxy_pass}}`) → a second nginx server on `127.0.0.1:8080` (matched by server_name)
+  → PHP-FPM on a per-site TCP port (`{{php_fpm_port}}`). `SCRIPT_FILENAME` is `$document_root$fastcgi_script_name`; with a symlinked
+  release that keeps the old real path in opcache. The derived template uses `$realpath_root` and adds `DOCUMENT_ROOT`, so the path given
+  to PHP-FPM is the release itself.
+- Every PHP version CloudPanel offers is installed side by side (`php8.2`, `/usr/bin/php8.2`, service `php8.2-fpm`); a site user's plain `php` is the
+  system one (8.4), so remote commands name the versioned binary.

@@ -14,6 +14,7 @@ import (
 	"github.com/masilia/deploykit/internal/fleet"
 	"github.com/masilia/deploykit/internal/inventory"
 	"github.com/masilia/deploykit/internal/manifest"
+	"github.com/masilia/deploykit/internal/transport"
 )
 
 // signalContext is cancelled by Ctrl-C and SIGTERM.
@@ -27,8 +28,8 @@ func (a *app) nodeProject(targetID string) (*project, *inventory.Target, error) 
 	if err != nil {
 		return nil, nil, err
 	}
-	if p.m.Runtime.Type != manifest.RuntimePM2 {
-		return nil, nil, fmt.Errorf("this command is for pm2 targets, this manifest uses runtime %s (compose: `deploy --version`, `deploy --rollback`, `fleet`, `server`)", p.m.Runtime.Type)
+	if !p.m.ReleaseBased() {
+		return nil, nil, fmt.Errorf("this command is for pm2 and php-fpm targets, this manifest uses runtime %s (compose: `deploy --version`, `deploy --rollback`, `fleet`, `server`)", p.m.Runtime.Type)
 	}
 	t, err := p.target(targetID)
 	return p, t, err
@@ -39,8 +40,14 @@ func (a *app) newNode(p *project, t *inventory.Target, opts deploy.Options, work
 	if err != nil {
 		return nil, err
 	}
+	var root transport.Transport
+	if php, err := p.m.PHP(); err == nil && php.Reload == "root-systemctl" {
+		if root, err = a.ssh(t, p.m, roleRoot); err != nil {
+			return nil, err
+		}
+	}
 	return deploy.NewNode(deploy.Node{
-		Manifest: p.m, Target: t, Local: a.local, Site: site,
+		Manifest: p.m, Target: t, Local: a.local, Site: site, Root: root,
 		Repo: p.repo, WorkDir: workDir, Author: currentUser(), Now: a.now, Opts: opts,
 	})
 }
@@ -102,6 +109,25 @@ func (a *app) nodeStatus(ctx context.Context, p *project, targets []*inventory.T
 
 // nodeHealth asks the server of a pm2 target to fetch its health path, as the end of a deploy does.
 func (a *app) nodeHealth(ctx context.Context, p *project, t *inventory.Target) error {
+	if p.m.Runtime.Type == manifest.RuntimePHPFPM {
+		php, err := p.m.PHP()
+		if err != nil {
+			return err
+		}
+		site, err := a.ssh(t, p.m, roleSite)
+		if err != nil {
+			return err
+		}
+		h := php.Health
+		last, ok, err := deploy.HealthyHTTP(ctx, site, h.Backend, t.Get("domain"), h.Path, h.Expect, h.Tries, h.Interval)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("%s answers %s, expected one of %v", h.Path, orDash(last), h.Expect)
+		}
+		return nil
+	}
 	cfg, err := p.m.PM2()
 	if err != nil {
 		return err
@@ -140,9 +166,9 @@ func (a *app) deployCmd() *cobra.Command {
 			switch p.m.Runtime.Type {
 			case manifest.RuntimeCompose:
 				return a.composeDeploy(ctx, p, target, cf)
-			case manifest.RuntimePM2:
+			case manifest.RuntimePM2, manifest.RuntimePHPFPM:
 			default:
-				return fmt.Errorf("runtime %s is not implemented yet (pm2 and compose are)", p.m.Runtime.Type)
+				return fmt.Errorf("runtime %s is not implemented yet (pm2, php-fpm and compose are)", p.m.Runtime.Type)
 			}
 			return a.nodeDeploy(ctx, cmd.ErrOrStderr(), p, target, opts)
 		},
@@ -153,13 +179,39 @@ func (a *app) deployCmd() *cobra.Command {
 	f.BoolVar(&opts.FromWorktree, "from-worktree", false, "pm2: build the working tree instead of a clean export of the ref")
 	f.BoolVar(&opts.SkipInstall, "skip-install", false, "pm2: skip the dependency install")
 	f.BoolVar(&opts.SkipChecks, "skip-checks", false, "pm2: skip lint and type checks")
-	f.BoolVar(&opts.BuildOnly, "build-only", false, "pm2: build and smoke-test locally, upload nothing")
+	f.BoolVar(&opts.BuildOnly, "build-only", false, "pm2, php-fpm: build and smoke-test locally, upload nothing")
+	f.StringArrayVar(&opts.Also, "also", nil, "php-fpm: a named command of runtime.commands to run in the live release after the deploy (repeatable)")
 	f.StringVar(&cf.version, "version", "", "compose: version to deploy (X.Y.Z); an older one is a rollback")
 	f.StringVar(&cf.rollback, "rollback", "", "compose: alias of --version, to make the intent explicit")
 	f.BoolVar(&cf.install, "install", false, "compose: first installation instead of an update")
 	f.StringVar(&cf.envFile, "env", "", "compose: KEY=VALUE file injected into the server .env (secrets travel on stdin)")
 	f.BoolVar(&cf.gates, "gates", false, "compose: run the quality gates before building a missing release")
 	f.StringVar(&cf.binary, "server-binary", "", "compose: deploykit binary to upload (needed when this machine is not the server's platform)")
+	return cmd
+}
+
+// runCmd runs a named command of the manifest in the live release.
+func (a *app) runCmd() *cobra.Command {
+	var target string
+	cmd := &cobra.Command{
+		Use:   "run <command>",
+		Short: "Run a named command of runtime.commands in the live release (php-fpm): reindex, clear the cache, migrate…",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, stop := signalContext(cmd)
+			defer stop()
+			p, t, err := a.nodeProject(target)
+			if err != nil {
+				return err
+			}
+			n, err := a.newNode(p, t, deploy.Options{}, os.TempDir())
+			if err != nil {
+				return err
+			}
+			return a.flow("run "+args[0], p.m.Project+" → "+t.ID, func() error { return n.RunCommand(ctx, a.runner(a.dryRun), args[0]) })
+		},
+	}
+	cmd.Flags().StringVarP(&target, "target", "t", "", "target id")
 	return cmd
 }
 
@@ -214,7 +266,7 @@ func (a *app) bootstrapCmd() *cobra.Command {
 				return a.flow("bootstrap", p.m.Project+" → "+t.ID, func() error {
 					return (&deploy.ComposeBootstrap{Manifest: p.m, Target: t, Root: root, DNS: a.dns}).Run(ctx, a.runner(a.dryRun))
 				})
-			case manifest.RuntimePM2:
+			case manifest.RuntimePM2, manifest.RuntimePHPFPM:
 				site, err := a.ssh(t, p.m, roleSite)
 				if err != nil {
 					return err
