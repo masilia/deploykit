@@ -66,6 +66,10 @@ Every command takes `--dry-run`: read-only checks run, nothing is changed. Examp
 - **One deploy at a time** per site (a lock), and every compose command names its project explicitly, so two instances on
   one host cannot act on each other.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md); security reports go through [SECURITY.md](SECURITY.md).
+
 ## Documentation
 
 [PLAN.md](PLAN.md) (design, status), [docs/adr/](docs/adr/) (decisions), [docs/cloudpanel-cli.md](docs/cloudpanel-cli.md)

@@ -127,13 +127,13 @@ ingress has not run on a real host.**
 | Phase | State |
 |---|---|
 | 1 Core | Done: `envfile` (shell parity tests), `manifest` (strict, typed), `tmpl`, `inventory`, `transport` (Local, SSH, Fake), `runner`, plain renderer, `doctor` |
-| 2 CloudPanel | Done against a stub: `internal/cloudpanel` (sites, certificates with DNS check, ports, keys, pm2 boot). The vhost spike (Mercure SSE directives, PHP web root, opcache) still needs a sandbox CloudPanel server |
+| 2 CloudPanel | Done and validated on a real server: `internal/cloudpanel` (sites, certificates with DNS check, ports, keys, pm2 boot). The vhost question is settled (no directive needed, see `docs/cloudpanel-cli.md`); the PHP web root and opcache after a switch are still open |
 | 3 Node + pm2 | Done and validated on a real server: `bootstrap`, `deploy` (clean export, build, assemble, local smoke test, lock, atomic switch, health, automatic rollback, pruning), `rollback`, `status`. Rollback, pruning and hard links confirmed |
-| 4 Compose read-only | Done; `status`, `healthcheck`, `fleet status|backups` validated on a real pilot. `release` (image from a tag) tested locally only |
+| 4 Compose read-only | Done; `status`, `healthcheck`, `fleet status|backups` validated on a real pilot. `release` (image from a tag) used for real releases |
 | 5 Compose server | Done: `server update` (lock, disk, backup, migrate, restart, verify, automatic rollback), `install` (standalone and CloudPanel ingress), `backup` (real gpg end to end), `monitor`, `restore-test`, `renew-certs`, `cron`, `crons`. `backup`, `restore-test`, `monitor`, `update` (with rollback) and `install` behind CloudPanel validated on a real host; the standalone ingress and `renew-certs` are not |
 | 6 PHP | Not started: the PHP manifest is a hypothesis and there is no reference script (open question 2) |
 | 7 Orchestration | Partly: `deploy --version/--rollback/--install/--env` and `fleet deploy` for compose. Not done: the interactive `setup` wizard and the Bubble Tea TUI (the plain renderer is complete) |
-| 8 Switch-over | Not started: it needs staging then production runs |
+| 8 Switch-over | Done for both projects: each one deploys through deploykit (a compose application with a live pilot, a Next.js site under pm2) and its old scripts are archived. Still shell by choice: the database tooling |
 
 Deliberate differences from the shell scripts are listed in the ADRs and in the commit messages: no secret echoed in an
 error, `--dry-run` that really changes nothing (including the lock), the deploy lock for pm2 sites, failed releases purged
@@ -167,8 +167,16 @@ first, `.status` files instead of mtimes, one `rsync` trailing-slash rule for mi
 
 1. Sandbox CloudPanel server for the phase 2 spike? Does provisioning log in as root, or through a sudoer?
 2. Reference PHP project (Ibexa, Symfony, WordPress, Drupal)? Needed before phase 6.
-3. Module path, owner, licence, visibility (default `github.com/masilia/deploykit`, private). If public, scrub client
-   names from `examples/`.
+3. Settled: module `github.com/masilia/deploykit`, public, Apache-2.0, neutral examples.
 4. Mercure behind CloudPanel: settled and measured (docs/cloudpanel-cli.md). `clpctl` cannot set vhost directives and
    they are not needed: the stack's own proxy sends `X-Accel-Buffering: no` (in the application's own proxy). Deployed to the
    live pilot with release 1.1.5.
+
+## Remaining work
+
+- SSH: no retry or timeout policy yet; a network drop in the middle of a deploy is reported, not retried.
+- `fleet` covers compose targets only, not pm2 targets.
+- The standalone (certbot) ingress and `renew-certs` have not run on a real host; neither has a reboot test of the pm2 systemd unit and the crons.
+- PHP runtime (needs a reference project), PHP web root and opcache behind CloudPanel.
+- The interactive `setup` wizard and the Bubble Tea TUI.
+- Restore from a backup (the database tooling stays a separate project).
