@@ -178,5 +178,5 @@ first, `.status` files instead of mtimes, one `rsync` trailing-slash rule for mi
 
 - The standalone (certbot) ingress and `renew-certs` have not run on a real host; neither has a reboot test of the pm2 systemd unit and the crons.
 - PHP runtime (needs a reference project), PHP web root and opcache behind CloudPanel.
-- The interactive `setup` wizard and the Bubble Tea TUI.
+- The Bubble Tea TUI for deploys (the plain renderer is complete); `init` and `target add` use `huh` forms.
 - Restore from a backup (the database tooling stays a separate project).

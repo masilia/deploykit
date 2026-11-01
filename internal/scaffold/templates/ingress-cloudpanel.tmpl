@@ -1,0 +1,11 @@
+type: cloudpanel
+site:
+  type: reverse-proxy                        # clpctl site:add:reverse-proxy
+  url: "http://127.0.0.1:{{ target.proxy_port }}"
+  user: "{{ target.site_user }}"
+  user_password: { generate: 24, show_once: true }   # only for CloudPanel's file manager
+port_discovery: { pick: first_free_from_requested, requested: "{{ target.proxy_port }}", persist_in_target: true }
+tls:
+  command: lets-encrypt
+  require_dns: ["{{ target.domain }}"]
+  on_failure: warn                           # the site is still served with a self-signed certificate

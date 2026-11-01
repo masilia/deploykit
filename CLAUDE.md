@@ -58,6 +58,14 @@ standalone); an ingress may use `select` + `variants` (the `TLS_MODE` key: varia
   `Stack`, `Update` with automatic rollback, `Install`, `Backup`, `Monitor`, `RestoreTest`, crontab block), `internal/fleet`.
   `cmd/deploykit/server.go` is the `deploykit server …` entry used by deploy and cron.
 
+- `internal/scaffold` + `cmd/deploykit/cmd_init.go`: `init` and `target add`. `Detect` reads the repository; `Answers`
+  (flags, or the form) feed `Files`, which renders the manifest from the annotated templates in `templates/` (delimiters
+  `[[ ]]`, because the manifest's own `{{ }}` must pass through) and the target file; `NewPlan`/`Apply` write them without
+  overwriting silently. The questions are declared once (`initScreens`) and drawn by two renderers: `huh` full-screen
+  (`form_tui.go`) and a line-prompt one (`form_plain.go`, used by `--plain`, a dumb terminal and the tests; huh's own
+  accessible mode ignores hidden screens and dynamic options, so it is not used). Every rendered combination must load,
+  `Validate()` and decode into its typed sections (`render_test.go`); `examples/*` stay hand-written references.
+
 ## Conventions that are easy to get wrong
 
 - **Fake rules are first-match.** When a test needs a failure, register it before the success rules (see `newUpdateOpts`
@@ -87,6 +95,5 @@ standalone); an ingress may use `select` + `variants` (the `TLS_MODE` key: varia
 
 ## Not built yet
 
-PHP runtime and its manifest (hypothesis, no reference script), the interactive `setup` wizard, the Bubble Tea TUI, the
-CloudPanel vhost spike (Mercure SSE directives, PHP web root, opcache), and real-server runs of `server update|install`.
-See PLAN.md.
+PHP runtime and its manifest (hypothesis, no reference script), the Bubble Tea TUI for deploys, the standalone certbot ingress
+on a real host, and the PHP web root and opcache behind CloudPanel. See PLAN.md.

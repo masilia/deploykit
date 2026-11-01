@@ -34,6 +34,11 @@ type app struct {
 	dryRun       bool
 
 	out io.Writer
+	in  io.Reader // what the forms read; os.Stdin when nil
+
+	// interactive overrides the terminal check of init and target add; accessible forces line prompts. Tests set both.
+	interactive func() bool
+	accessible  bool
 
 	// Seams: production values are set by newApp; tests inject fakes.
 	local transport.Transport

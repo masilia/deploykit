@@ -26,6 +26,8 @@ You need `git`, `ssh` and `rsync` on the workstation, plus `node` for Next.js bu
 ## Quick start
 
 ```sh
+deploykit init                         # reads the repository, asks a few questions, writes deploykit.yaml + the first target
+deploykit target add                   # one more server later, same questions
 deploykit validate                     # check deploykit.yaml and the targets
 deploykit doctor -t acme               # tools, here and on the server
 
@@ -43,13 +45,20 @@ deploykit fleet status --all           # version, previous version and backup ag
 deploykit fleet deploy --all            # pm2 sites: build and deploy each target in rollout order (compose: --version X.Y.Z)
 ```
 
-Every command takes `--dry-run`: read-only checks run, nothing is changed. Examples to start from are in
-[`examples/`](examples/): `nextjs-cloudpanel`, `compose-app`, `php-cloudpanel` (a hypothesis).
+Every command takes `--dry-run`: read-only checks run, nothing is changed.
+
+`deploykit init` recognises a Next.js project (pm2) or a Docker Compose stack, proposes the project name, the services and
+the Dockerfiles it found, and lets you choose the sections you want (backups, restore test, monitoring, crons, quality
+checks, smoke test). It never overwrites a file without asking. Without a terminal, give the answers as flags:
+`deploykit init --yes --host srv.example.com --domain www.example.com`. `--plain` replaces the full-screen form by line
+prompts. The generated files are documented by the examples in [`examples/`](examples/): `nextjs-cloudpanel`,
+`compose-app` (every section), `php-cloudpanel` (a hypothesis).
 
 ## Commands
 
 | | |
 |---|---|
+| `init`, `target add` | create `deploykit.yaml` and the first target; add another server |
 | `validate`, `doctor` | check the manifest and the targets; check the tools needed here and on the server |
 | `bootstrap`, `deploy`, `rollback`, `status` | provision a site once; deploy; go back (`rollback` is pm2; for Compose deploy an older `--version`); show the live release or version |
 | `release` | build the images from a git tag and push them (`deploy` does it when they are missing) |

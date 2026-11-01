@@ -1,0 +1,10 @@
+# Own nginx container + certbot on ports 80/443 (never run on a real host yet): your proxy container must serve
+# /.well-known/acme-challenge from the certbot-www volume and load docker/nginx/tls/<domain>.conf.
+type: standalone
+tls:
+  type: certbot_webroot
+  email: "{{ env.LETSENCRYPT_EMAIL }}"
+  volumes: [letsencrypt, certbot-www]
+  domain_conf: { template: docker/nginx/tls/domain.conf.example, target: "docker/nginx/tls/{{ target.domain }}.conf" }
+  renew: { schedule: "15 3 * * *" }
+preflight: { port_80_free: true, dns_matches_server: true }

@@ -30,6 +30,14 @@ Manifests refer to `target.<name>`. Existing files of the legacy scripts work un
 
 Unknown keys are kept and available as `target.<lowercased key>`.
 
+## Creating targets
+
+`deploykit init` writes the first target and `deploykit target add` each further one, asking only about the server (id, host,
+SSH, domain, site user, path, loopback port, and the TLS mode when the manifest lets each target choose). Every answer is
+also a flag (`--id`, `--host`, `--ssh-port`, `--ssh-user`, `--domain`, `--site-user`, `--path`, `--app-port`, `--proxy-port`,
+`--tls-mode`), so a script can pass `--yes` and no question is asked. An existing id is refused. Nothing is contacted: the
+loopback port is only a starting point, `bootstrap` takes the next free one if it is taken.
+
 ## Rewritten by the tool
 
 `app_port` / `proxy_port` are written back to the target file when the requested port is taken and the next free one is
