@@ -203,5 +203,6 @@ fleet:
 
 ssh:
   connect_timeout: 10s
+  retries: 2                                           # a connection that cannot be established is retried (2 s, then 4 s); 0 disables
   batch_mode_for_reads: true
   provision_user: root                                 # only for the CloudPanel variant

@@ -121,6 +121,9 @@ func defaultSSH(t *inventory.Target, m *manifest.Manifest, r role) (transport.Tr
 		return nil, fmt.Errorf("target %s: ssh_port must be a number", t.ID)
 	}
 	s := &transport.SSH{Host: host, Port: port}
+	if s.ConnectTimeout, s.Retries, err = sshSettings(m.SSH); err != nil {
+		return nil, err
+	}
 	switch r {
 	case roleRoot:
 		s.User = t.Get("root_user")
@@ -135,6 +138,29 @@ func defaultSSH(t *inventory.Target, m *manifest.Manifest, r role) (transport.Tr
 		s.Prelude = m.SSH.SiteUserPrelude
 	}
 	return s, nil
+}
+
+// sshSettings reads ssh.connect_timeout (a duration of at least one second) and ssh.retries (0 disables the retries of
+// a connection that cannot be established). The transport's own defaults apply to what is not set.
+func sshSettings(c manifest.SSH) (connectTimeout, retries int, err error) {
+	if c.ConnectTimeout != "" {
+		d, perr := time.ParseDuration(c.ConnectTimeout)
+		if perr != nil || d < time.Second {
+			return 0, 0, fmt.Errorf("ssh.connect_timeout %q must be a duration of at least 1s, such as 10s", c.ConnectTimeout)
+		}
+		connectTimeout = int(d / time.Second)
+	}
+	if c.Retries != nil {
+		switch {
+		case *c.Retries < 0:
+			return 0, 0, fmt.Errorf("ssh.retries must be 0 or more, got %d", *c.Retries)
+		case *c.Retries == 0:
+			retries = -1
+		default:
+			retries = *c.Retries
+		}
+	}
+	return connectTimeout, retries, nil
 }
 
 func (a *app) runner(dryRun bool) *runner.Runner {

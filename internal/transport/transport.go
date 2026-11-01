@@ -49,6 +49,8 @@ type ExitError struct {
 	Code   int
 	Stderr string
 	Where  string
+	// Hint adds advice to the message, for example when an ssh session broke while the command was running.
+	Hint string
 }
 
 func (e *ExitError) Error() string {
@@ -58,6 +60,9 @@ func (e *ExitError) Error() string {
 			s = s[:300] + "…"
 		}
 		msg += ": " + s
+	}
+	if e.Hint != "" {
+		msg += " (" + e.Hint + ")"
 	}
 	return msg
 }

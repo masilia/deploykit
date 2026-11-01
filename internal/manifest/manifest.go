@@ -66,6 +66,7 @@ type SSH struct {
 	SiteUserPrelude       string `yaml:"site_user_prelude"`
 	ProvisionUser         string `yaml:"provision_user"`
 	ConnectTimeout        string `yaml:"connect_timeout"`
+	Retries               *int   `yaml:"retries"` // retries of a connection that cannot be established; 0 disables
 	BatchModeForReads     bool   `yaml:"batch_mode_for_reads"`
 	InstallKeyForSiteUser struct {
 		PublicKey string `yaml:"public_key"`

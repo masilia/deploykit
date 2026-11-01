@@ -278,3 +278,31 @@ func TestDoctorExplainsAMissingSiteUserBeforeBootstrap(t *testing.T) {
 		t.Errorf("output:\n%s", out)
 	}
 }
+
+func TestSSHSettings(t *testing.T) {
+	zero, two := 0, 2
+	for _, tc := range []struct {
+		name         string
+		in           manifest.SSH
+		timeout, ret int
+		bad          bool
+	}{
+		{name: "defaults when unset"},
+		{name: "timeout", in: manifest.SSH{ConnectTimeout: "25s"}, timeout: 25},
+		{name: "retries", in: manifest.SSH{Retries: &two}, ret: 2},
+		{name: "zero retries disable them", in: manifest.SSH{Retries: &zero}, ret: -1},
+		{name: "bad duration", in: manifest.SSH{ConnectTimeout: "soon"}, bad: true},
+		{name: "sub-second timeout", in: manifest.SSH{ConnectTimeout: "500ms"}, bad: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			timeout, ret, err := sshSettings(tc.in)
+			if (err != nil) != tc.bad || timeout != tc.timeout || ret != tc.ret {
+				t.Errorf("sshSettings = %d, %d, %v", timeout, ret, err)
+			}
+		})
+	}
+	neg := -1
+	if _, _, err := sshSettings(manifest.SSH{Retries: &neg}); err == nil {
+		t.Error("negative retries must be refused")
+	}
+}
