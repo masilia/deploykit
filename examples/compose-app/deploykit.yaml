@@ -1,0 +1,207 @@
+# Example profile: a Docker Compose web application (images from a registry), behind CloudPanel or standalone.
+# A complete profile: every section the compose runtime understands. Database tooling (db-dump, db-push,
+# restore-dump) is out of scope.
+# PROPOSAL: the v1 schema is not frozen yet (see PLAN.md, ADR 0002).
+
+version: 1
+project: acme                   # compose project name: volumes are `acme_documents`, `acme_letsencrypt`, ...
+
+inventory: targets/             # one target per file `targets/<id>.env`, no secret (was deployment/clients/)
+global_config: deploy.env       # editor-side, git-ignored, mode 600: REGISTRY, GHCR_USER, GHCR_TOKEN
+
+# --- Artifact: two images built from a git tag and pushed to a registry --------------------------------
+artifact:
+  type: image
+  registry: "{{ config.REGISTRY }}"          # must be explicit host/namespace, e.g. ghcr.io/my-org
+  registry_login:
+    host: ghcr.io
+    user: "{{ config.GHCR_USER }}"
+    token: "{{ config.GHCR_TOKEN }}"         # passed to `docker login --password-stdin`
+  version_pattern: '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'
+  source:
+    ref: "v{{ version }}"                    # built from `git archive`, never from the worktree
+    create_tag_if_missing: true              # tag created on HEAD when absent
+  images:
+    - { name: frontend, dockerfile: docker/Dockerfile.front, context: . }
+    - { name: backend,  dockerfile: docker/Dockerfile.api,   context: . }
+  tags: ["{{ version }}", "sha-{{ commit7 }}"]
+  gates: { command: make ci, opt_in: true }  # `--gates`
+  ensure_release: true                       # deploy builds + pushes when the images are missing from the registry
+
+# --- Runtime: Docker Compose on the server -------------------------------------------------------------
+runtime:
+  type: compose
+  min_compose: "2.24"                        # `!override` in the CloudPanel override file
+  files: [docker-compose.prod.yml]
+  overrides:
+    - { when: "target.tls_mode == 'cloudpanel'", file: docker-compose.cloudpanel.yaml }
+  version_state:                             # where the installed and previous versions are kept
+    file: .env
+    current_key: APP_VERSION
+    previous_key: APP_VERSION_PREV
+  installed_marker: .installed
+  journal: versions.log
+  lock: .lock-ops                            # directory with a `pid` file; stale locks recovered
+
+  services:
+    - { name: proxy,     role: proxy }
+    - { name: front,     role: app }
+    - { name: api,       role: app }
+    - { name: scheduler, role: worker }
+    - { name: worker,    role: worker }
+    - { name: db,        role: db }
+    - { name: redis,     role: cache }
+    - { name: hub,       role: realtime }
+
+  # `app` commands run in a one-off container of the `api` service (`compose run --rm api ...`)
+  app:
+    service: api
+    commands:
+      migrate:         php bin/console doctrine:migrations:migrate -n
+      seed_roles:      php bin/console app:seed-roles
+      jwt_keypair:     php bin/console lexik:jwt:generate-keypair --skip-if-exists
+      create_admin:    # password goes through the environment, never argv
+        run: >-
+          php bin/console app:create-user --email={{ env.ADMIN_EMAIL }}
+          --first-name={{ env.ADMIN_FIRST_NAME }} --last-name={{ env.ADMIN_LAST_NAME }} --force
+        env_from: { APP_CREATE_USER_PASSWORD: ADMIN_PASSWORD }
+      schema_validate: php bin/console doctrine:schema:validate --skip-sync   # run with `exec`, after the health probes
+      rotate_secrets:  php bin/console app:secrets:rotate                     # re-encrypts stored secrets with APP_ENCRYPTION_KEY (idempotent)
+    hooks:
+      after_migrate:
+        - php bin/console app:data:backfill           # idempotent; project specific
+
+  health:
+    wait: { timeout: 180s, interval: 5s }             # until every service is running and healthy
+    probes:
+      - { name: health-api,   http: "{{ base_url }}/api/v1/health", contains: '"status"' }
+      - { name: health-front, http: "{{ base_url }}/api/health",    contains: '"status"' }
+      - { name: hub-sse,      http: "{{ base_url }}/.well-known/mercure?match=/events/refresh", method: HEAD, tries: 3, delay: 2s }
+      - { name: scheduler,    service: scheduler, log_contains: "scheduler tick", since: 5m, wait: true }
+    after: [schema_validate]                         # also required for an update to count as healthy
+
+  update:
+    steps: [lock, disk_check, backup, pull, migrate, secrets, up, proxy_reload, verify]
+    disk: { path: docker_root, min_free_mb: "{{ env.MIN_FREE_MB | default: 2000 }}" }
+    on_failure:
+      rollback: previous_version                     # AUTO_ROLLBACK=0 in .env disables it; the schema is not undone
+    cleanup: { keep_versions: [current, previous], prune_dangling: true }
+    after: [rotate_secrets, monitoring_cron]   # rotate_secrets only after a verified update: an automatic rollback to an
+                                               # older version could not read the re-encrypted (`v2:`) secrets
+  install:
+    steps: [secrets, images_pull, up_data, jwt_keypair, migrate, seed_roles, create_admin, up_all, tls, crons, monitoring_cron, health]
+    reminders:
+      - "Copy BACKUP_PASSPHRASE to a password manager OFF this server: without it the backups are unreadable."
+      - "Copy APP_ENCRYPTION_KEY off this server too: lost, the stored API keys and channel secrets cannot be read."
+
+# --- Server .env: schema -------------------------------------------------------------------------------
+env:
+  file: .env
+  template: deployment/.env.example                   # copied on first install, mode 600
+  prompts: [DOMAIN, ADMIN_EMAIL, ADMIN_FIRST_NAME, ADMIN_LAST_NAME]
+  secrets:                                            # generated when absent or CHANGE_ME*, never overwritten
+    APP_SECRET:         { hex_bytes: 32 }
+    JWT_PASSPHRASE:     { hex_bytes: 16 }
+    MERCURE_JWT_SECRET: { hex_bytes: 32 }
+    POSTGRES_PASSWORD:  { hex_bytes: 16 }
+    BACKUP_PASSPHRASE:  { hex_bytes: 16 }
+    ADMIN_PASSWORD:     { hex_bytes: 12 }
+    HEALTH_TOKEN:       { hex_bytes: 16 }             # also generated before `up` on old servers
+    APP_ENCRYPTION_KEY: { hex_bytes: 32 }             # dedicated key for stored API keys and channel secrets
+  from_target_on_deploy: [REGISTRY]                   # `deploy` rewrites it in the remote .env
+
+# --- Data protection (database tooling is out of scope; backups are in) --------------------------------
+data:
+  database:
+    type: postgres
+    service: db
+    dump: 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"'
+    verify: 'pg_restore -l'                           # an unreadable dump aborts the backup
+  volumes: [documents]                                # archived through a throwaway alpine container, read-only
+  include_files: [.env]
+backup:
+  name_prefix: acme-backup                             # <prefix>-<YYYYMMDD-HHMMSS>[-monthly].tar.gpg + .sha256
+  dir: ./backups
+  encryption: { type: gpg, cipher: AES256, passphrase_key: BACKUP_PASSPHRASE }
+  verify: [sha256, decrypt_and_list]                  # deleted when unreadable
+  retention: { daily_days: 7, monthly_days: 30, monthly_on_day: 1 }
+  min_free_mb: "{{ env.BACKUP_MIN_FREE_MB | default: 500 }}"
+  offsite: { rsync_target: "{{ env.BACKUP_RSYNC_TARGET }}", optional: true, on_failure: warn }
+  schedule: "30 2 * * *"
+restore_test:
+  schedule: "0 4 2 * *"
+  throwaway_database: restore_check                   # never the live database
+  checks:
+    min_tables_ratio: 0.9                             # restored tables vs the live database
+    migrations_table: doctrine_migration_versions
+    migrations_min_rows: 1
+
+# --- Supervision: runs on the server, outside the application ------------------------------------------
+monitor:
+  schedule: "*/5 * * * *"
+  state_file: log/monitor.state
+  fail_threshold: "{{ env.MONITOR_FAILS | default: 2 }}"
+  remind_hours: "{{ env.MONITOR_REMIND_HOURS | default: 6 }}"
+  skip_while_locked: true
+  checks:
+    - services                                         # every service running and healthy
+    - { http: "{{ base_url }}/api/v1/health", contains: '"status"' }
+    - { http: "{{ base_url }}/api/v1/health/details", header: { X-Health-Token: "{{ env.HEALTH_TOKEN }}" }, json_status: data.status }
+    - { disk_free_mb_warn: "{{ env.MIN_FREE_MB | default: 2000 }}" }
+  base_url_when_cloudpanel: "http://127.0.0.1:{{ target.proxy_port }}"   # with a `Host:` header
+notify:
+  slack_webhook: "{{ env.SLACK_WEBHOOK_URL }}"        # empty = silent; a send failure never aborts the caller
+
+crons:                                                 # project jobs, one marked block per deployment root
+  - { name: monthly-report, schedule: "15 1 1 * *", run: "compose run --rm api php bin/console app:report:monthly" }
+
+# --- Ingress: chosen per target (the TLS_MODE key) -------------------------------------------------------
+# `select` + `variants` (ADR 0002): one manifest serves clients on both ingress types. The cloudpanel variant needs
+# SITE_USER and PROXY_PORT in the target; see docs/targets.md.
+ingress:
+  select: "{{ target.tls_mode | default: certbot }}"   # the TLS_MODE of the target; certbot when absent (default)
+  variants:
+    cloudpanel:
+      type: cloudpanel
+      site:
+        type: reverse-proxy                            # clpctl site:add:reverse-proxy
+        url: "http://127.0.0.1:{{ target.proxy_port }}"
+        user: "{{ target.site_user }}"
+        user_password: { generate: 24, show_once: true }
+      port_discovery: { pick: first_free_from_requested, requested: "{{ target.proxy_port }}", persist_in_target: true }
+      tls:
+        command: lets-encrypt
+        require_dns: ["{{ target.domain }}"]
+        on_failure: warn
+      # No vhost directive is needed. clpctl cannot set any (docs/cloudpanel-cli.md), and the usual two are redundant:
+      # nginx's global client_max_body_size is 64M and the stack's proxy enforces its own limit. CloudPanel's
+      # nginx does buffer server-sent events for HTTP/1.1 clients, which the stack's own proxy cures by sending
+      # `add_header X-Accel-Buffering no;` from its Mercure location (a `mercure.conf` snippet of the proxy).
+      vhost_extra: { status: inner_proxy_sends_x_accel_buffering }
+    certbot:
+      type: standalone
+      tls:
+        type: certbot_webroot
+        email: "{{ env.LETSENCRYPT_EMAIL }}"
+        volumes: [letsencrypt, certbot-www]
+        domain_conf: { template: docker/nginx/tls/domain.conf.example, target: "docker/nginx/tls/{{ target.domain }}.conf" }
+        renew: { schedule: "15 3 * * *" }
+      preflight: { port_80_free: true, dns_matches_server: true }
+
+# --- Deployment tree sent to the server ----------------------------------------------------------------
+# Compose runtime: the server receives the deploykit binary of the same version (no more rsync of scripts).
+sync:
+  files: [docker-compose.prod.yml, docker-compose.cloudpanel.yaml, deployment/.env.example, docker/, docs/DEPLOYMENT.md, docs/CLIENT_INSTALLATION.md, docs/MAINTENANCE.md, docs/BACKUP_AND_RESTORE.md]
+  never: [deploy.env, targets/]                        # other clients' inventory never reaches a server
+
+# --- Fleet ---------------------------------------------------------------------------------------------
+fleet:
+  rollout_order_key: ROLLOUT_ORDER                     # ascending, default 50, then id
+  contract_key: CONTRACT                               # supervised | ondemand; `--supervised` filters on it
+  backup_stale_hours: 26
+  status_columns: [client, domain, host, version, previous, contract, backup, state]
+
+ssh:
+  connect_timeout: 10s
+  batch_mode_for_reads: true
+  provision_user: root                                 # only for the CloudPanel variant

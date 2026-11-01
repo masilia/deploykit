@@ -1,0 +1,60 @@
+version: 2
+
+project_name: deploykit
+
+before:
+  hooks:
+    - go mod tidy
+
+# Two binaries from the same main package: `deploykit` and its short alias `dk`.
+builds:
+  - id: deploykit
+    main: ./cmd/deploykit
+    binary: deploykit
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/masilia/deploykit/internal/version.Version={{ .Version }}
+      - -X github.com/masilia/deploykit/internal/version.Commit={{ .ShortCommit }}
+      - -X github.com/masilia/deploykit/internal/version.Date={{ .Date }}
+  - id: dk
+    main: ./cmd/deploykit
+    binary: dk
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/masilia/deploykit/internal/version.Version={{ .Version }}
+      - -X github.com/masilia/deploykit/internal/version.Commit={{ .ShortCommit }}
+      - -X github.com/masilia/deploykit/internal/version.Date={{ .Date }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [README.md]
+
+checksum:
+  name_template: checksums.txt
+
+# A tag creates a DRAFT release: nothing is visible to anyone else until the draft is reviewed and published by hand.
+release:
+  draft: true
+  prerelease: auto
+
+changelog:
+  sort: asc
+  groups:
+    - { title: Features, regexp: '^feat(\(.+\))?!?:', order: 0 }
+    - { title: Fixes, regexp: '^fix(\(.+\))?!?:', order: 1 }
+    - { title: Other, order: 2 }
+  filters:
+    exclude:
+      - '^docs(\(.+\))?:'
+      - '^test(\(.+\))?:'
+      - '^chore(\(.+\))?:'

@@ -1,0 +1,14 @@
+# Go
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Local
+/.deploykit/
+.env
+*.local
+.idea/
+.vscode/

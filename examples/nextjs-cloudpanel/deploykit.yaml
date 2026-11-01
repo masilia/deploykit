@@ -1,0 +1,121 @@
+# Example profile: Next.js (standalone) on CloudPanel, local build, releases, pm2.
+# See docs/profile-nextjs-cloudpanel.md.
+# PROPOSAL: the v1 schema is not frozen yet (see PLAN.md, ADR 0002).
+
+version: 1
+project: acme-site
+
+inventory: targets/             # one target per file `targets/<id>.env`, no secret
+
+# --- Artifact: built on the workstation, uploaded as a release folder ---------------------------------
+artifact:
+  type: release-dir
+  source: { ref: HEAD }         # clean `git archive` export (ADR 0005); `--from-worktree` opts out
+  build:
+    node: "22"
+    checks:                     # run before the build; `--skip-checks` skips them
+      - npm run lint
+      - npx tsc --noEmit
+    install: npm ci             # `--skip-install` skips it
+    command: npm run build
+    env:
+      NEXT_PUBLIC_SITE_URL: "{{ target.site_url }}"   # baked at build time: sitemap.xml and robots.txt
+  # Release assembly: each line copies `from` to `to` inside the release folder.
+  assemble:
+    - { from: ".next/standalone/.", to: "." }
+    - { from: ".next/static",       to: ".next/static" }
+    - { from: "public",             to: "public", replace: true }   # standalone only contains part of it
+  keep: 3                       # releases kept on the server
+
+# --- Local check of the release, before anything is uploaded --------------------------------------------
+smoke:
+  start:
+    command: node server.js     # run inside the release folder
+    env: { NODE_ENV: production, HOSTNAME: "0.0.0.0" }
+    port: { range: [3300, 3799] }              # random free port
+    remove_env: [NODE_OPTIONS]
+  follow_redirects: 3                           # with a cookie jar: language redirects depend on it
+  expect: [200, 206]
+  paths:
+    - /fr
+    - /en
+    - /fr/services
+    - /fr/contact
+    - /fr/projets
+    - /fr/credits
+    - /icon.png
+    - /apple-icon.png
+    - /favicon.ico
+    - /manifest.webmanifest
+    - /robots.txt
+    - /sitemap.xml
+    - /brand/logo.png
+  discover:                                     # paths derived from the home page
+    - { from: /fr, match: '/_next/static/[^"\\]*\.css', first: true }
+  ranges:                                       # `Range: bytes=0-1023` requests, 206 expected
+    - /video/hero.mp4
+
+# --- Runtime on the server ----------------------------------------------------------------------------
+runtime:
+  type: pm2
+  name: "{{ project }}"
+  entry: server.js
+  cwd: current                  # symlink to the active release
+  env:
+    NODE_ENV: production
+    PORT: "{{ target.app_port }}"
+    # 0.0.0.0 and not 127.0.0.1: with next-intl, 127.0.0.1 makes translated paths (/fr/projets) loop.
+    # The port stays closed on the firewall, only nginx reaches it.
+    HOSTNAME: "0.0.0.0"
+  max_memory: 700M
+  on_boot:
+    systemd_unit: "pm2-{{ target.site_user }}"  # created by `pm2 startup systemd -u <user> --hp <home>`
+  switch: atomic_symlink        # ln -sfn <release> current.tmp && mv -Tf current.tmp current
+  preflight:
+    same_arch: true             # `sharp` is compiled for the build machine: local uname -sm = remote
+    port_free_on_first_deploy: true
+  health:
+    where: server               # run on the server, not from the workstation
+    path: /fr
+    expect: 200
+    tries: 30
+    interval: 1s
+  on_failure:
+    rollback: previous_release
+    show_logs: "pm2 logs {{ runtime.name }} --lines 30 --nostream"
+
+# --- Ingress: CloudPanel Node.js site ------------------------------------------------------------------
+ingress:
+  type: cloudpanel
+  site:
+    type: nodejs                # clpctl site:add:nodejs
+    node_version: "22"
+    app_port: "{{ target.app_port }}"
+    user: "{{ target.site_user }}"
+    user_password: { generate: 24, show_once: true }   # only for SFTP / file manager (ADR 0006)
+  port_discovery:               # ports already taken on the server
+    listening: "ss -ltnH | awk '{print $4}' | sed 's/.*://'"
+    declared: "grep -rhoE '(127\\.0\\.0\\.1|localhost|0\\.0\\.0\\.0):[0-9]{2,5}' /etc/nginx/sites-enabled /etc/nginx/conf.d"
+    pick: first_free_from_requested
+    persist_in_target: true     # writes app_port back to targets/<id>.env
+  tls:
+    command: lets-encrypt       # clpctl lets-encrypt:install:certificate
+    require_dns: [ "{{ target.domain }}", "www.{{ target.domain }}" ]   # CloudPanel adds www to the certificate
+    san_www: if_dns_resolves
+    on_failure: warn            # the site is still served with a self-signed certificate
+
+# --- SSH access -----------------------------------------------------------------------------------------
+ssh:
+  commands_on_stdin: true       # `bash -l -s`: never a quoted command with apostrophes as an argument
+  site_user_prelude: 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; [ -f ~/.profile ] && . ~/.profile'
+  provision_user: root          # `clpctl` requires root (or a sudoer)
+  install_key_for_site_user:
+    public_key: auto            # the key the server really accepts (`ssh -v … | grep "Server accepts key"`)
+
+# --- Planned (not covered by the original scripts) --------------------------------------------------------
+env: {}                         # schema of a future `shared/.env` (runtime secrets, never in the repository)
+hooks:
+  before_upload:                # replaces the old project-specific "reminders" feature
+    - run: 'grep -q "No mail backend yet" "src/app/[locale]/contact/actions.ts" && echo "reminder: the contact form is still a demo, no request is sent." || true'
+  before_switch: []
+  after_switch: []
