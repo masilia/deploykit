@@ -58,6 +58,10 @@ standalone); an ingress may use `select` + `variants` (the `TLS_MODE` key: varia
   `Stack`, `Update` with automatic rollback, `Install`, `Backup`, `Monitor`, `RestoreTest`, crontab block), `internal/fleet`.
   `cmd/deploykit/server.go` is the `deploykit server …` entry used by deploy and cron.
 
+- Output has two layouts. `ui.Plain` (timestamped lines) is for anything that is not a terminal and for `--plain`; at a
+  terminal `ui.Pretty` (spinner, folded output) draws the runner events and `cmd/deploykit/styled.go` draws `validate`,
+  `doctor`, `status`, `fleet` and `healthcheck` with `ui.Styles` (`app.styled()` decides; tests set `app.forceStyled`).
+  Every styled print has a plain twin with the exact old text, because the tests and the logs depend on it.
 - `internal/scaffold` + `cmd/deploykit/cmd_init.go`: `init` and `target add`. `Detect` reads the repository; `Answers`
   (flags, or the form) feed `Files`, which renders the manifest from the annotated templates in `templates/` (delimiters
   `[[ ]]`, because the manifest's own `{{ }}` must pass through) and the target file; `NewPlan`/`Apply` write them without

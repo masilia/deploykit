@@ -29,3 +29,19 @@ func TestFormThemeBuilds(t *testing.T) {
 		t.Error("the focused title should be bold")
 	}
 }
+
+func TestDarkBackgroundDoesNotAskTheTerminal(t *testing.T) {
+	for _, c := range []struct {
+		theme, fgbg string
+		want        bool
+	}{
+		{"", "", true}, {"light", "", false}, {"DARK", "15;0", true},
+		{"", "0;15", false}, {"", "15;0", true}, {"", "0;default;15", false}, {"", "garbage;x", true},
+	} {
+		t.Setenv("DEPLOYKIT_THEME", c.theme)
+		t.Setenv("COLORFGBG", c.fgbg)
+		if got := darkBackground(); got != c.want {
+			t.Errorf("theme %q COLORFGBG %q: dark = %v, want %v", c.theme, c.fgbg, got, c.want)
+		}
+	}
+}

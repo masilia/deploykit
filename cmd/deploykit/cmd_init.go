@@ -26,7 +26,7 @@ type answerFlags struct {
 	composeFile, appService, migrate    string
 	healthPath                          string
 	dockerfiles                         []string
-	yes, force, plain                   bool
+	yes, force                          bool
 }
 
 func (f *answerFlags) register(cmd *cobra.Command, withProject bool) {
@@ -53,7 +53,6 @@ func (f *answerFlags) register(cmd *cobra.Command, withProject bool) {
 	fl.IntVar(&f.proxyPort, "proxy-port", 0, "compose behind CloudPanel: loopback port of the proxy (default 8081)")
 	fl.StringVar(&f.tlsMode, "tls-mode", "", "compose with a per-target ingress: cloudpanel or certbot")
 	fl.BoolVar(&f.yes, "yes", false, "accept the defaults without asking or confirming")
-	fl.BoolVar(&f.plain, "plain", false, "plain line prompts instead of the full-screen form")
 }
 
 // override applies the flags the user actually typed.
@@ -112,7 +111,7 @@ func (a *app) canAsk(f *answerFlags) bool {
 	if a.interactive != nil {
 		return a.interactive()
 	}
-	if f.plain { // line prompts work on a pipe too: the caller said it will answer
+	if a.plain { // line prompts work on a pipe too: the caller said it will answer
 		return true
 	}
 	return term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd())
@@ -123,7 +122,7 @@ func (a *app) formOptions(f *answerFlags, finds scaffold.Findings) scaffold.Form
 	if in == nil {
 		in = os.Stdin
 	}
-	accessible := f.plain || os.Getenv("TERM") == "dumb" || a.accessible || !hasScreenSize()
+	accessible := a.plain || os.Getenv("TERM") == "dumb" || a.accessible || !hasScreenSize()
 	if accessible {
 		in = bufio.NewReader(in) // shared by every prompt of the command, so none of them loses buffered answers
 	}

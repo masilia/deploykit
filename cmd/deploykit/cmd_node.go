@@ -66,7 +66,7 @@ func (a *app) nodeDeploy(ctx context.Context, errOut io.Writer, p *project, targ
 	if err != nil {
 		return err
 	}
-	return n.Deploy(ctx, a.runner(a.dryRun))
+	return a.flow("deploy", p.m.Project+" → "+t.ID, func() error { return n.Deploy(ctx, a.runner(a.dryRun)) })
 }
 
 // nodeStatus queries the live release of each pm2 target.
@@ -180,7 +180,7 @@ func (a *app) rollbackCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return n.Rollback(ctx, a.runner(a.dryRun), to)
+			return a.flow("rollback", p.m.Project+" → "+t.ID, func() error { return n.Rollback(ctx, a.runner(a.dryRun), to) })
 		},
 	}
 	cmd.Flags().StringVarP(&target, "target", "t", "", "target id")
@@ -211,14 +211,16 @@ func (a *app) bootstrapCmd() *cobra.Command {
 			}
 			switch p.m.Runtime.Type {
 			case manifest.RuntimeCompose:
-				return (&deploy.ComposeBootstrap{Manifest: p.m, Target: t, Root: root, DNS: a.dns}).Run(ctx, a.runner(a.dryRun))
+				return a.flow("bootstrap", p.m.Project+" → "+t.ID, func() error {
+					return (&deploy.ComposeBootstrap{Manifest: p.m, Target: t, Root: root, DNS: a.dns}).Run(ctx, a.runner(a.dryRun))
+				})
 			case manifest.RuntimePM2:
 				site, err := a.ssh(t, p.m, roleSite)
 				if err != nil {
 					return err
 				}
 				b := &deploy.Bootstrap{Manifest: p.m, Target: t, Root: root, Site: site, DNS: a.dns, PublicKey: pubkey}
-				return b.Run(ctx, a.runner(a.dryRun))
+				return a.flow("bootstrap", p.m.Project+" → "+t.ID, func() error { return b.Run(ctx, a.runner(a.dryRun)) })
 			}
 			return fmt.Errorf("runtime %s is not implemented yet", p.m.Runtime.Type)
 		},
@@ -248,7 +250,7 @@ func (a *app) statusCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				_, _ = fmt.Fprint(a.out, fleet.FormatTable(rows))
+				a.printFleetTable(rows)
 				return nil
 			}
 			site, err := a.ssh(t, p.m, roleSite)
@@ -264,17 +266,7 @@ func (a *app) statusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintf(a.out, "target %s (%s)\ncurrent %s\n", t.ID, site.Describe(), orDash(cur))
-			for _, r := range list {
-				mark, commit := " ", "-"
-				if r.Stamp == cur {
-					mark = "*"
-				}
-				if r.Meta != nil {
-					commit = r.Meta.Commit
-				}
-				_, _ = fmt.Fprintf(a.out, "%s %s  %-10s %s\n", mark, r.Stamp, r.Status, commit)
-			}
+			a.printReleases(t.ID, site.Describe(), cur, list)
 			return nil
 		},
 	}

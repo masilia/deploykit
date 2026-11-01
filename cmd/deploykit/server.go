@@ -15,6 +15,7 @@ import (
 	"github.com/masilia/deploykit/internal/manifest"
 	"github.com/masilia/deploykit/internal/notify"
 	"github.com/masilia/deploykit/internal/tmpl"
+	"github.com/masilia/deploykit/internal/ui"
 )
 
 // serverCtx is everything a `deploykit server …` command needs, loaded from the deployment root it runs in.
@@ -290,17 +291,11 @@ func (a *app) printHealth(ctx context.Context, st *compose.Stack, base string) e
 	if err != nil {
 		return err
 	}
-	for _, r := range results {
-		mark := "OK "
-		if !r.OK {
-			mark = "KO "
-		}
-		_, _ = fmt.Fprintf(a.out, "%s%s: %s\n", mark, r.Name, r.Detail)
-	}
+	a.printProbes(results, base)
 	if !compose.HealthOK(results) {
 		return fmt.Errorf("health check failed")
 	}
-	_, _ = fmt.Fprintf(a.out, "healthy: %s\n", base)
+	a.printLine("healthy: "+base, func(st *ui.Styles) string { return "\n" + st.OK("healthy") })
 	return nil
 }
 

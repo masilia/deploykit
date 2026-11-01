@@ -29,6 +29,7 @@ func newRootCmdTo(out io.Writer, a *app) *cobra.Command {
 	pf.StringVar(&a.repoPath, "repo", a.repoPath, "git repository to build and upload from (default: the directory of the manifest)")
 	pf.BoolVarP(&a.verbose, "verbose", "v", a.verbose, "show the output of every step, not only of failed ones")
 	pf.BoolVar(&a.dryRun, "dry-run", a.dryRun, "show what would run; read-only checks still execute, nothing is changed")
+	pf.BoolVar(&a.plain, "plain", a.plain, "plain timestamped lines and line prompts instead of the styled layout (the default without a terminal)")
 
 	root.AddCommand(
 		newVersionCmd(),
@@ -70,7 +71,6 @@ func (a *app) validateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintf(a.out, "%s: project %s, artifact %s, runtime %s\n", p.m.Path(), p.m.Project, p.m.Artifact.Type, p.m.Runtime.Type)
 			ids, err := inventory.List(p.inventoryDir())
 			if err != nil {
 				return err
@@ -80,7 +80,7 @@ func (a *app) validateCmd() *cobra.Command {
 					return err
 				}
 			}
-			_, _ = fmt.Fprintf(a.out, "%d target(s) in %s: %v\n", len(ids), p.inventoryDir(), ids)
+			a.printValidated(p.m.Path(), p.m.Project, p.m.Artifact.Type, p.m.Runtime.Type, ids, p.inventoryDir())
 			return nil
 		},
 	}

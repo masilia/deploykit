@@ -19,6 +19,10 @@ Download the archive for your platform from the GitHub releases (linux and macOS
 go install github.com/masilia/deploykit/cmd/deploykit@latest
 ```
 
+`go install` puts the binary in `~/go/bin`: make sure that folder is in your `PATH`, ahead of any older copy
+(`command -v deploykit` shows which one runs). From a checkout, `make install` builds and installs `deploykit` and `dk`
+into `~/.local/bin` (`PREFIX=/usr/local make install` for another place).
+
 You need `git`, `ssh` and `rsync` on the workstation, plus `node` for Next.js builds or `docker` for image releases.
 `deploykit doctor` checks the workstation and the server. For Docker Compose stacks the server also needs `docker`
 (compose 2.24+), `gpg` and `cron`; deploykit uploads its own binary there.
@@ -53,6 +57,14 @@ checks, smoke test). It never overwrites a file without asking. Without a termin
 `deploykit init --yes --host srv.example.com --domain www.example.com`. `--plain` replaces the full-screen form by line
 prompts. The generated files are documented by the examples in [`examples/`](examples/): `nextjs-cloudpanel`,
 `compose-app` (every section), `php-cloudpanel` (a hypothesis).
+
+## What it looks like
+
+At a terminal, deploykit draws each flow as a short list of steps (a spinner while one runs, a check mark and its duration
+when it ends, the command output folded away unless a step fails), and shows `validate`, `doctor`, `status` and `fleet`
+as aligned, coloured tables. Pipes, files, cron, CI, `TERM=dumb` and `--plain` keep the timestamped plain lines. The
+palette follows `DEPLOYKIT_THEME=light|dark` (then `COLORFGBG`, then dark). If a terminal never answers the colour
+query that the terminal library sends at start-up, `TERM=dumb` skips it.
 
 ## Commands
 

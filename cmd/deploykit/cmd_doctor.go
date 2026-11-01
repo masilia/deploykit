@@ -45,9 +45,7 @@ func (a *app) doctorCmd() *cobra.Command {
 					report = append(report, doctor.Check(cmd.Context(), root, doctor.ServerTools(p.m, true))...)
 				}
 			}
-			for _, r := range report {
-				_, _ = fmt.Fprintf(a.out, "%-5s %-24s %-16s %s\n", r.Level, r.Where, r.Name, r.Detail)
-			}
+			a.printReport(report)
 			if doctor.Worst(report) == doctor.Fail {
 				return fmt.Errorf("some required tools are missing")
 			}

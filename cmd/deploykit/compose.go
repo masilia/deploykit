@@ -16,6 +16,7 @@ import (
 	"github.com/masilia/deploykit/internal/inventory"
 	"github.com/masilia/deploykit/internal/manifest"
 	"github.com/masilia/deploykit/internal/tmpl"
+	"github.com/masilia/deploykit/internal/ui"
 )
 
 type composeFlags struct {
@@ -106,7 +107,11 @@ func (a *app) composeDeploy(ctx context.Context, p *project, targetID string, f 
 	} else if c.Binary, err = os.Executable(); err != nil {
 		return err
 	}
-	return c.Run(ctx, a.runner(a.dryRun))
+	subtitle := p.m.Project + " → " + t.ID
+	if f.version != "" {
+		subtitle += "  " + f.version
+	}
+	return a.flow("deploy", subtitle, func() error { return c.Run(ctx, a.runner(a.dryRun)) })
 }
 
 func (a *app) releaseCmd() *cobra.Command {
@@ -143,7 +148,7 @@ func (a *app) releaseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.runner(a.dryRun).Do(ctx, rel.Steps()...)
+			return a.flow("release", p.m.Project+"  "+version, func() error { return a.runner(a.dryRun).Do(ctx, rel.Steps()...) })
 		},
 	}
 	cmd.Flags().StringVar(&version, "version", "", "version to release (X.Y.Z)")
@@ -238,7 +243,7 @@ func (a *app) fleetCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				_, _ = fmt.Fprint(a.out, fleet.FormatNodeTable(rows))
+				a.printNodeTable(rows)
 				for _, r := range rows {
 					if !r.Reachable {
 						return fmt.Errorf("at least one target is unreachable")
@@ -250,7 +255,7 @@ func (a *app) fleetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, _ = fmt.Fprint(a.out, fleet.FormatTable(rows))
+			a.printFleetTable(rows)
 			for _, r := range rows {
 				if !r.Reachable {
 					return fmt.Errorf("at least one target is unreachable")
@@ -271,14 +276,24 @@ func (a *app) fleetCmd() *cobra.Command {
 				return err
 			}
 			var failed []string
+			st := a.styles()
+			if a.styled() {
+				_, _ = fmt.Fprint(a.out, st.Banner("healthcheck", fmt.Sprintf("%d target(s)", len(ts)))+"\n")
+			}
 			for _, t := range ts {
-				_, _ = fmt.Fprintf(a.out, "healthcheck %s …\n", t.ID)
+				if !a.styled() {
+					_, _ = fmt.Fprintf(a.out, "healthcheck %s …\n", t.ID)
+				}
 				if err := a.fleetHealth(cmd.Context(), p, t); err != nil {
 					failed = append(failed, t.ID)
-					_, _ = fmt.Fprintf(a.out, "%s: FAILED: %v\n", t.ID, err)
+					a.printLine(fmt.Sprintf("%s: FAILED: %v", t.ID, err), func(st *ui.Styles) string {
+						return "  " + st.Fail("%s  %s", st.Bold.Render(t.ID), st.Danger.Render(err.Error()))
+					})
 					continue
 				}
-				_, _ = fmt.Fprintf(a.out, "%s: OK\n", t.ID)
+				a.printLine(t.ID+": OK", func(st *ui.Styles) string {
+					return "  " + st.OK("%s  %s", st.Bold.Render(t.ID), st.Muted.Render("healthy"))
+				})
 			}
 			if len(failed) > 0 {
 				return fmt.Errorf("healthcheck failed on %v", failed)
@@ -309,10 +324,10 @@ func (a *app) fleetCmd() *cobra.Command {
 				return err
 			}
 			bad := false
-			_, _ = fmt.Fprintf(a.out, "%-14s %-10s %s\n", "TARGET", "AGE", "STATE")
+			var table [][]string
 			for _, r := range rows {
 				if !r.Reachable {
-					_, _ = fmt.Fprintf(a.out, "%-14s %-10s %s\n", r.Target, "-", "unreachable")
+					table = append(table, []string{r.Target, "-", "unreachable"})
 					bad = true
 					continue
 				}
@@ -321,9 +336,10 @@ func (a *app) fleetCmd() *cobra.Command {
 				if r.BackupAge >= 0 {
 					age = fmt.Sprintf("%dh", r.BackupAge)
 				}
-				_, _ = fmt.Fprintf(a.out, "%-14s %-10s %s\n", r.Target, age, label)
+				table = append(table, []string{r.Target, age, label})
 				bad = bad || !ok
 			}
+			a.printBackups(table)
 			if bad {
 				return fmt.Errorf("at least one backup is missing, stale or unreachable")
 			}

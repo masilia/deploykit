@@ -3,7 +3,10 @@ package ui
 import (
 	"fmt"
 	"io"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -18,6 +21,31 @@ var (
 	colWarn    = lipgloss.AdaptiveColor{Light: "#9A6700", Dark: "#F5C451"}
 	colMuted   = lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#8B93A1"}
 )
+
+var configure sync.Once
+
+// darkBackground decides which half of the adaptive palette to use without asking the terminal: the question (an OSC 11
+// query) is answered by nothing on some terminals and delays every command until a timeout. DEPLOYKIT_THEME=light|dark
+// wins, then COLORFGBG ("15;0": foreground;background, set by many terminals), then dark.
+func darkBackground() bool {
+	switch strings.ToLower(os.Getenv("DEPLOYKIT_THEME")) {
+	case "light":
+		return false
+	case "dark":
+		return true
+	}
+	if parts := strings.Split(os.Getenv("COLORFGBG"), ";"); len(parts) >= 2 {
+		if bg, err := strconv.Atoi(parts[len(parts)-1]); err == nil {
+			return bg < 7 || bg == 8
+		}
+	}
+	return true
+}
+
+// setup fixes the background once for every renderer, the default one (used by the forms) included.
+func setup() {
+	configure.Do(func() { lipgloss.SetHasDarkBackground(darkBackground()) })
+}
 
 // Icons shared with the plain renderer.
 const (
@@ -45,7 +73,9 @@ type Styles struct {
 // NewStyles binds the styles to w: a terminal gets colour and rounded borders, anything else gets the same layout in
 // plain characters.
 func NewStyles(w io.Writer) *Styles {
+	setup()
 	r := lipgloss.NewRenderer(w)
+	r.SetHasDarkBackground(darkBackground())
 	s := &Styles{r: r}
 	s.Title = r.NewStyle().Bold(true).Foreground(colAccent)
 	s.Muted = r.NewStyle().Foreground(colMuted)
@@ -116,6 +146,7 @@ func (s *Styles) Rows(pairs [][2]string) string {
 
 // FormTheme is the huh theme of the interactive forms, in the same palette.
 func FormTheme() *huh.Theme {
+	setup()
 	t := huh.ThemeCharm()
 	f := &t.Focused
 	f.Base = f.Base.BorderForeground(colAccent)

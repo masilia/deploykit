@@ -7,12 +7,20 @@ LDFLAGS  := -s -w \
 	-X $(MODULE)/internal/version.Commit=$(COMMIT) \
 	-X $(MODULE)/internal/version.Date=$(DATE)
 
-.PHONY: build test vet lint snapshot clean
+PREFIX   ?= $(HOME)/.local
+
+.PHONY: build install test vet lint snapshot clean
 
 ## build: compile bin/deploykit and the bin/dk alias
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o bin/deploykit ./cmd/deploykit
 	ln -sf deploykit bin/dk
+
+## install: build, then install deploykit and its dk alias into $(PREFIX)/bin (default ~/.local/bin)
+install: build
+	install -d $(PREFIX)/bin
+	install -m 755 bin/deploykit $(PREFIX)/bin/deploykit
+	ln -sf deploykit $(PREFIX)/bin/dk
 
 ## test: run the unit tests
 test:

@@ -15,7 +15,6 @@ import (
 	"github.com/masilia/deploykit/internal/manifest"
 	"github.com/masilia/deploykit/internal/runner"
 	"github.com/masilia/deploykit/internal/transport"
-	"github.com/masilia/deploykit/internal/ui"
 )
 
 // role selects which SSH identity a transport uses on a CloudPanel server.
@@ -32,6 +31,8 @@ type app struct {
 	repoPath     string // the git repository to build and upload from; default: the manifest's directory
 	verbose      bool
 	dryRun       bool
+	plain        bool // --plain: timestamped lines and line prompts, even at a terminal
+	forceStyled  bool // tests: render the styled layout without a terminal
 
 	out io.Writer
 	in  io.Reader // what the forms read; os.Stdin when nil
@@ -169,7 +170,7 @@ func sshSettings(c manifest.SSH) (connectTimeout, retries int, err error) {
 }
 
 func (a *app) runner(dryRun bool) *runner.Runner {
-	return &runner.Runner{Reporter: ui.NewPlain(a.out, a.verbose), DryRun: dryRun}
+	return &runner.Runner{Reporter: a.reporter(), DryRun: dryRun}
 }
 
 func currentUser() string {
