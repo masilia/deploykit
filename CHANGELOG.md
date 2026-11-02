@@ -10,6 +10,8 @@ all of it.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-02
+
 ### Fixed
 - The release archives now include `LICENSE` (Apache-2.0) and `CHANGELOG.md`; they used to carry only the README.
 
@@ -125,7 +127,8 @@ The first public version: one binary, driven by a per-project `deploykit.yaml`, 
 - `--dry-run` that changes nothing, the lock included; secrets that never reach a command line, a log or an error message.
 - Documentation: `PLAN.md`, decision records, a CloudPanel CLI reference and the record of what ran on a real server.
 
-[Unreleased]: https://github.com/masilia/deploykit/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/masilia/deploykit/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/masilia/deploykit/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/masilia/deploykit/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/masilia/deploykit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/masilia/deploykit/compare/v0.2.0...v0.3.0
