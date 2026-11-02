@@ -10,6 +10,8 @@ all of it.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-02
+
 ### Added
 - **A Docker stack profile for PHP projects with Redis, Solr and Varnish** (`examples/php-ibexa-docker`, `docs/profile-php-docker.md`):
   the compose runtime behind a CloudPanel reverse-proxy site, with PHP-FPM, nginx, Varnish, MariaDB, Redis and Solr. Validated as a
@@ -117,7 +119,8 @@ The first public version: one binary, driven by a per-project `deploykit.yaml`, 
 - `--dry-run` that changes nothing, the lock included; secrets that never reach a command line, a log or an error message.
 - Documentation: `PLAN.md`, decision records, a CloudPanel CLI reference and the record of what ran on a real server.
 
-[Unreleased]: https://github.com/masilia/deploykit/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/masilia/deploykit/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/masilia/deploykit/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/masilia/deploykit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/masilia/deploykit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/masilia/deploykit/compare/v0.1.4...v0.2.0
