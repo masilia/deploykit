@@ -139,7 +139,7 @@ func (in *Install) steps(name string) ([]runner.Step, error) {
 		}, nil
 	case "up_data":
 		return []runner.Step{{Name: "start data services", Plan: "docker compose up -d for the data services", Run: func(ctx context.Context, out io.Writer) error {
-			names := svcByRole("db", "cache", "realtime")
+			names := svcByRole("db", "cache", "search", "realtime")
 			if len(names) == 0 {
 				return nil
 			}

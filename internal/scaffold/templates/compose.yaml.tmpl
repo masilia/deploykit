@@ -86,7 +86,7 @@ env:
     [[ .Key ]]: { hex_bytes: [[ .Bytes ]] }
 [[- end ]]
 [[- end ]]
-  from_target_on_deploy: [REGISTRY]          # `deploy` rewrites it in the remote .env
+  from_target_on_deploy: [REGISTRY, PROXY_PORT]  # `deploy` rewrites them in the remote .env (PROXY_PORT: the port bootstrap picked)
 [[ if .Has "backup" ]]
 # --- Backups (encrypted with gpg, verified before they are kept) ----------------------------------------------
 data:

@@ -67,6 +67,9 @@ func (s *Stack) argv(args ...string) ([]string, error) {
 	if s.Project != "" {
 		argv = append(argv, "-p", s.Project)
 	}
+	if s.Cfg.ProjectDirectory != "" {
+		argv = append(argv, "--project-directory", s.Cfg.ProjectDirectory)
+	}
 	for _, f := range files {
 		argv = append(argv, "-f", f)
 	}

@@ -124,3 +124,45 @@ Findings that only the real server could show (all fixed, with tests):
 
 Not covered: Redis, Solr and Varnish (profile B, the Docker stack), a database dump of a real site (the test used a clean install), and the
 live site's cutover.
+
+## Round 5: the Ibexa Docker stack (Redis, Solr, Varnish) as a throwaway instance on a shared host
+
+An Ibexa 4.6 project (`examples/php-ibexa-docker`) deployed with the compose runtime behind a CloudPanel reverse-proxy site, on the host that also
+runs live sites, as its own instance: own path, own compose project, own loopback port, own domain. A clean `ibexa:install` provided the data. The
+domain had no DNS record at first (the probes ran through the loopback port with the site's `Host` header); the record was added later and the
+certificate issued, so the last rows were measured through HTTPS.
+
+| Flow | Result |
+|---|---|
+| `release` (four images, two stages of one multi-stage Dockerfile) | Built from the tag export and pushed: PHP image 1 min 39 s, the three others a few seconds, push 3 min |
+| `bootstrap` | Reverse-proxy site and its user created, next free loopback port picked, deployment root created; the certificate step reported the missing DNS and the run went on |
+| `deploy --install` | Six services healthy: MariaDB, Redis, Solr, PHP-FPM, nginx, Varnish. Memory kept small with the `.env` sizing keys |
+| `ibexa:install` through `docker compose run` | Schema, clean data and Solr re-indexing; `/` answers 302 and `/login` 200 through Varnish |
+| `healthcheck`, `status` | Eight probes pass |
+| `deploy --version` (update) | Backup made and verified, pull, migration, recreation, `nginx -s reload`, verification: 1 min 17 s. Varnish restarted after nginx (`depends_on … restart: true`) |
+| Deploying the older version (rollback) | 1 min 30 s; the journal shows both versions; the monitor cron wrote its state |
+| Update whose migration fails | The project's migrations need data a clean install lacks. The update stopped before any restart: backup kept, lock released, the running version still served |
+| HTTPS through CloudPanel | Let's Encrypt certificate (verified chain), `/` redirects to `https://<domain>/login` (the scheme survives the proxies), HTTP redirects to HTTPS, Varnish is in the circuit |
+| Cache and purge on that chain | A page is a MISS, then a HIT; a hard purge with the right token answers 200 and the next request is a MISS again; a wrong token, no token, and a plain `PURGE` from the internet through CloudPanel all answer 405 |
+| Before/after comparison with the host | Only the instance's own resources differ: vhost, user, port, CloudPanel site and certificate, containers, volumes, network, cron block, files |
+
+Findings (the first is fixed, with a regression test):
+
+1. **`PROXY_PORT` never reached the server `.env`.** `bootstrap` picks a free loopback port and writes it to the target, but the server `.env` kept the
+   template's value, which was the live pilot's port: Varnish could not bind. `env.from_target_on_deploy` was parsed and never applied; it now copies
+   each listed key from the target (`PROXY_PORT` → `proxy_port`), and an explicit `--env` value still wins.
+2. **A migration that fails leaves `.env` ahead of the containers.** `APP_VERSION` already names the new version while the old one runs. The message says so
+   ("manual rollback: set APP_VERSION=… and run the update again"); the next `up` of any service would use the new tag.
+3. **Running the migration command recreates the dependencies whose image tag changed** (here Solr, whose image carries the release tag). Its volume survives,
+   but the service restarts before the update has passed its own checks.
+4. The install flow cannot load a database: it ends before the probes and tells the operator to load one (a dump, or `ibexa:install`) and then run an update.
+5. **The DNS check of `bootstrap` uses the workstation's resolver.** A home router that had cached the "no such name" answer kept the certificate step
+   failing for the better part of an hour while the authoritative servers, public resolvers and the server itself already answered. The certificate was
+   issued on the server with the very command `bootstrap` would have run. Checking from the server, or retrying, would avoid the wait.
+6. **Test hosts matter to Ibexa.** With every host variable set to the same name, the host matcher picked an administration siteaccess, where the
+   anonymous user may not log in, and every Symfony route (the invalidation-token route included) redirected to the login page. With distinct hosts the
+   public site served and the purge worked. The clean data also limits the anonymous `user/login` policy to the stock siteaccess: a real database
+   already carries the project's.
+
+Not covered: the project's own migrations on a real database, the automatic rollback of a version that fails its probes (covered by
+round 2 for another stack), and anything about the host's other sites beyond the before/after comparison.

@@ -351,3 +351,31 @@ func TestComposeDryRunTouchesNothing(t *testing.T) {
 		t.Errorf("a dry run contacted the server %d times:\n%s", n, fx.site.Trace())
 	}
 }
+
+func TestComposeTakesTheKeysListedInFromTargetOnDeployFromTheTarget(t *testing.T) {
+	fx := newComposeFixture(t, nil)
+	// bootstrap picked a free loopback port and wrote it to the target; the server .env still holds the template's.
+	if err := os.WriteFile(filepath.Join(fx.repo, "targets", "acme.env"), []byte("DEPLOY_HOST=srv\nDEPLOY_USER=deploy\nDEPLOY_PATH="+composeRoot+"\nDOMAIN=app.acme.fr\nTLS_MODE=certbot\nPROXY_PORT=8082\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target, err := inventory.Open(filepath.Join(fx.repo, "targets"), "acme", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.c.Target = target
+	text, err := os.ReadFile(filepath.Join(fx.repo, "deploykit.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Parse([]byte(strings.Replace(string(text), "from_target_on_deploy: [REGISTRY]", "from_target_on_deploy: [REGISTRY, PROXY_PORT]", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.c.Manifest = m
+	if err := fx.run(t); err != nil {
+		t.Fatal(err)
+	}
+	if env := fx.savedEnv(); !strings.Contains(env, "PROXY_PORT=8082") {
+		t.Errorf("the target's proxy port must reach the server .env:\n%s", env)
+	}
+}

@@ -27,6 +27,7 @@ type Image struct {
 		Name       string `yaml:"name"`
 		Dockerfile string `yaml:"dockerfile"`
 		Context    string `yaml:"context"`
+		Target     string `yaml:"target"` // multi-stage Dockerfile: the stage to build (docker build --target)
 	} `yaml:"images"`
 	Tags  []string `yaml:"tags"`
 	Gates struct {
@@ -51,6 +52,9 @@ func (m *Manifest) Image() (*Image, error) {
 	for n, img := range i.Images {
 		if img.Name == "" || img.Dockerfile == "" {
 			return nil, errorf("images[%d]: name and dockerfile are required", n)
+		}
+		if img.Target != "" && !stageNamePattern.MatchString(img.Target) {
+			return nil, errorf("images[%d]: target %q is not a Dockerfile stage name", n, img.Target)
 		}
 	}
 	if len(i.Tags) == 0 {
@@ -115,7 +119,10 @@ type Compose struct {
 	Type       string   `yaml:"type"`
 	MinCompose string   `yaml:"min_compose"`
 	Files      []string `yaml:"files"`
-	Overrides  []struct {
+	// ProjectDirectory is passed as `docker compose --project-directory`: where the server .env is read and what relative
+	// paths in the compose files mean. Needed when the files live in a subfolder (docker/) but the .env sits in the root.
+	ProjectDirectory string `yaml:"project_directory"`
+	Overrides        []struct {
 		When string `yaml:"when"`
 		File string `yaml:"file"`
 	} `yaml:"overrides"`
@@ -169,6 +176,9 @@ func (m *Manifest) Compose() (*Compose, error) {
 	var c Compose
 	if err := m.Runtime.Decode(&c); err != nil {
 		return nil, err
+	}
+	if d := c.ProjectDirectory; d != "" && (strings.HasPrefix(d, "/") || d == ".." || strings.HasPrefix(d, "../") || strings.Contains(d, "/../")) {
+		return nil, errorf("project_directory %q must be a path inside the deployment root", d)
 	}
 	if len(c.Files) == 0 {
 		return nil, errorf("files: at least one compose file is required")
@@ -506,6 +516,9 @@ type CronJob struct {
 	Schedule string `yaml:"schedule"`
 	Run      string `yaml:"run"`
 }
+
+// stageNamePattern is what `FROM … AS <name>` accepts, so a target never carries a flag or a path.
+var stageNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
 var cronNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 

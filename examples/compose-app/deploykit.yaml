@@ -108,7 +108,7 @@ env:
     ADMIN_PASSWORD:     { hex_bytes: 12 }
     HEALTH_TOKEN:       { hex_bytes: 16 }             # also generated before `up` on old servers
     APP_ENCRYPTION_KEY: { hex_bytes: 32 }             # dedicated key for stored API keys and channel secrets
-  from_target_on_deploy: [REGISTRY]                   # `deploy` rewrites it in the remote .env
+  from_target_on_deploy: [REGISTRY, PROXY_PORT]                   # `deploy` rewrites it in the remote .env
 
 # --- Data protection (database tooling is out of scope; backups are in) --------------------------------
 data:

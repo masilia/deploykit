@@ -84,6 +84,22 @@ func newRelease(t *testing.T, version string) (*Release, *transport.Fake) {
 	}, docker
 }
 
+func TestReleaseBuildsTheRequestedStageOfAMultiStageDockerfile(t *testing.T) {
+	r, docker := newRelease(t, "1.2.3")
+	r.Cfg.Images[0].Target = "php"
+	if err := (&runner.Runner{}).Do(t.Context(), r.Steps()...); err != nil {
+		t.Fatal(err)
+	}
+	trace := docker.Trace()
+	src := filepath.Join(r.WorkDir, "src")
+	if want := "docker build -f " + src + "/docker/Dockerfile.front --target php -t ghcr.io/acme/frontend:1.2.3"; !strings.Contains(trace, want) {
+		t.Errorf("trace lacks %q:\n%s", want, trace)
+	}
+	if strings.Contains(trace, "Dockerfile.api --target") {
+		t.Errorf("an image without a target must not get one:\n%s", trace)
+	}
+}
+
 func TestRefs(t *testing.T) {
 	r, _ := newRelease(t, "1.2.3")
 	refs, err := r.Refs("abc1234")
@@ -253,5 +269,29 @@ func TestPresentRetriesAfterLogin(t *testing.T) {
 	}
 	if !strings.Contains(docker.Trace(), "docker login ghcr.io") {
 		t.Errorf("a login must happen between the two probes:\n%s", docker.Trace())
+	}
+}
+
+func TestIbexaDockerExampleBuildsFourImagesFromTwoStagesAndTwoSmallContexts(t *testing.T) {
+	m, err := manifest.Load("../../examples/php-ibexa-docker/deploykit.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := m.Image()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Release{Cfg: img, Registry: "ghcr.io/acme", Version: "1.2.3"}
+	refs, err := r.Refs("abc1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, b := range refs {
+		got = append(got, b.Name+" "+b.Dockerfile+" "+b.Context+" "+b.Target)
+	}
+	want := "ibexa-php docker/Dockerfile . php|ibexa-web docker/Dockerfile . web|ibexa-varnish docker/varnish/Dockerfile docker/varnish |ibexa-solr docker/solr/Dockerfile docker/solr/conf "
+	if strings.Join(got, "|") != want {
+		t.Errorf("images = %q\nwant     %q", strings.Join(got, "|"), want)
 	}
 }

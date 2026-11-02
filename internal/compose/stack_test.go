@@ -56,6 +56,18 @@ func TestFilesFollowTheTLSMode(t *testing.T) {
 	}
 }
 
+func TestProjectDirectoryIsPassedToCompose(t *testing.T) {
+	s, f := newStack(t, "certbot")
+	s.Cfg.ProjectDirectory = "."
+	s.Cfg.Files = []string{"docker/docker-compose.prod.yml"}
+	if _, err := s.Run(t.Context(), nil, "up", "-d"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.Calls()[0].Spec.Argv, " "); got != "docker compose -p acme --project-directory . -f docker/docker-compose.prod.yml up -d" {
+		t.Errorf("argv = %s", got)
+	}
+}
+
 func TestState(t *testing.T) {
 	s, f := newStack(t, "certbot")
 	f.OnFunc(func(sp transport.Spec) bool { return sp.Env["DK_SVC"] == "front" }, transport.Result{Stdout: "true healthy\n"})

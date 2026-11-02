@@ -218,16 +218,18 @@ ingress: { type: standalone }
 		t.Fatalf("base manifest: %v", err)
 	}
 	for name, tc := range map[string]struct{ yaml, want string }{
-		"typo in the runtime":    {strings.Replace(base, "files:", "fils: [x], files:", 1), "fils"},
-		"no registry":            {strings.Replace(base, "registry: ghcr.io/org, ", "", 1), "registry"},
-		"no services":            {strings.Replace(base, ", services: [{ name: web, role: app }]", "", 1), "services"},
-		"app service not listed": {strings.Replace(base, "files: [docker-compose.yml]", "files: [docker-compose.yml], app: { service: api }", 1), "not a declared service"},
-		"unknown monitor check":  {base + "monitor: { checks: [bogus] }\n", "unknown monitor check"},
-		"backup without prefix":  {base + "data: { volumes: [a] }\nbackup: { dir: ./b }\n", "name_prefix"},
-		"bad monthly day":        {base + "data: {}\nbackup: { name_prefix: p, retention: { monthly_on_day: 31 } }\n", "monthly_on_day"},
-		"gpg without passphrase": {base + "data: {}\nbackup: { name_prefix: p, encryption: { type: gpg } }\n", "passphrase_key"},
-		"secret of zero bytes":   {base + "env: { secrets: { A: { hex_bytes: 0 } } }\n", "hex_bytes"},
-		"typo in standalone":     {strings.Replace(base, "ingress: { type: standalone }", "ingress: { type: standalone, tls: { typ: x } }", 1), "typ"},
+		"typo in the runtime":       {strings.Replace(base, "files:", "fils: [x], files:", 1), "fils"},
+		"no registry":               {strings.Replace(base, "registry: ghcr.io/org, ", "", 1), "registry"},
+		"no services":               {strings.Replace(base, ", services: [{ name: web, role: app }]", "", 1), "services"},
+		"app service not listed":    {strings.Replace(base, "files: [docker-compose.yml]", "files: [docker-compose.yml], app: { service: api }", 1), "not a declared service"},
+		"project directory escapes": {strings.Replace(base, "files: [docker-compose.yml]", "files: [docker-compose.yml], project_directory: ../elsewhere", 1), "project_directory"},
+		"unknown monitor check":     {base + "monitor: { checks: [bogus] }\n", "unknown monitor check"},
+		"backup without prefix":     {base + "data: { volumes: [a] }\nbackup: { dir: ./b }\n", "name_prefix"},
+		"bad monthly day":           {base + "data: {}\nbackup: { name_prefix: p, retention: { monthly_on_day: 31 } }\n", "monthly_on_day"},
+		"gpg without passphrase":    {base + "data: {}\nbackup: { name_prefix: p, encryption: { type: gpg } }\n", "passphrase_key"},
+		"secret of zero bytes":      {base + "env: { secrets: { A: { hex_bytes: 0 } } }\n", "hex_bytes"},
+		"target is a flag":          {strings.Replace(base, "dockerfile: Dockerfile }", "dockerfile: Dockerfile, target: \"--network=host\" }", 1), "not a Dockerfile stage name"},
+		"typo in standalone":        {strings.Replace(base, "ingress: { type: standalone }", "ingress: { type: standalone, tls: { typ: x } }", 1), "typ"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Parse([]byte(tc.yaml))

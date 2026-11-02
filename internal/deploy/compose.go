@@ -305,6 +305,19 @@ func (c *Compose) configureEnv(ctx context.Context, out io.Writer, cfg *manifest
 	if err != nil {
 		return err
 	}
+	// Keys the manifest takes from the target (env.from_target_on_deploy), such as PROXY_PORT: bootstrap may have picked a
+	// free port that differs from the template's, and compose reads the port from this .env. REGISTRY has its own path
+	// below, and an explicit --env value wins over the target because it is applied afterwards.
+	for _, key := range env.FromTargetOnDeploy {
+		if key == "REGISTRY" {
+			continue
+		}
+		if v := c.Target.Get(strings.ToLower(key)); v != "" {
+			if err := doc.Set(key, v); err != nil {
+				return err
+			}
+		}
+	}
 	if err := doc.Apply(c.EnvFile); err != nil {
 		return err
 	}

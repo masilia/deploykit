@@ -9,7 +9,8 @@ SSH, with [CloudPanel](https://www.cloudpanel.io/)'s `clpctl` doing the site pro
 | Next.js / Node | release folder (rsync) | pm2 | CloudPanel Node.js site | validated on a real server |
 | Docker stack behind CloudPanel | registry image | Docker Compose | CloudPanel reverse-proxy site | validated on a real server |
 | Docker stack, standalone server | registry image | Docker Compose | own nginx + certbot | written, **not run on a real host** |
-| PHP (Symfony, Ibexa), simple installation | release folder (rsync) | PHP-FPM | CloudPanel PHP site | written, tested with fakes and a real build; **not yet run on a server** |
+| PHP (Symfony, Ibexa), simple installation | release folder (rsync) | PHP-FPM | CloudPanel PHP site | validated on a throwaway site of a real server |
+| PHP (Ibexa) with Redis, Solr, Varnish | registry images (multi-stage Dockerfile) | Docker Compose | CloudPanel reverse-proxy site | validated as a throwaway instance on a real server, HTTPS included |
 
 ## Install
 

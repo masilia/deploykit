@@ -104,6 +104,6 @@ standalone); an ingress may use `select` + `variants` (the `TLS_MODE` key: varia
 
 ## Not built yet
 
-The Docker stack profile for PHP (Ibexa with Redis, Solr, Varnish: the compose runtime plus project Dockerfiles), the php-fpm runtime on a
-real server (written and tested with fakes, and its release built for real, not run remotely yet), the Bubble Tea TUI for deploys, and the
+The Docker stack profile for PHP (`examples/php-ibexa-docker`: the compose runtime plus project Dockerfiles) with a real database (it ran as a throwaway
+instance with a clean one), `deploykit run` for the compose runtime, the `init` template for that profile, the Bubble Tea TUI for deploys, and the
 standalone certbot ingress on a real host. See PLAN.md.

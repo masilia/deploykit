@@ -47,6 +47,7 @@ type Built struct {
 	Name       string
 	Dockerfile string
 	Context    string
+	Target     string   // multi-stage Dockerfile: the stage to build
 	Tags       []string // full references, registry included
 }
 
@@ -85,7 +86,7 @@ func (r *Release) Refs(commit7 string) ([]Built, error) {
 	vars := tmpl.Vars{"version": r.Version, "commit7": commit7}
 	var out []Built
 	for _, img := range r.Cfg.Images {
-		b := Built{Name: img.Name, Dockerfile: img.Dockerfile, Context: img.Context}
+		b := Built{Name: img.Name, Dockerfile: img.Dockerfile, Context: img.Context, Target: img.Target}
 		if b.Context == "" {
 			b.Context = "."
 		}
@@ -218,6 +219,9 @@ func (r *Release) Steps() []runner.Step {
 						continue
 					}
 					argv := []string{"docker", "build", "-f", filepath.Join(src, b.Dockerfile)}
+					if b.Target != "" {
+						argv = append(argv, "--target", b.Target)
+					}
 					for _, t := range b.Tags {
 						argv = append(argv, "-t", t)
 					}
