@@ -25,6 +25,9 @@ all of it.
 - `init` no longer archives the volumes of the database, the cache and the search engine with the application's files (`data.volumes`): the database has its dump and the
   others can be rebuilt.
 
+### Fixed
+- `init` no longer offers `Dockerfile.dockerignore`, the ignore file of a Dockerfile, as a Dockerfile to build.
+
 ## [0.5.1] - 2026-11-02
 
 ### Fixed

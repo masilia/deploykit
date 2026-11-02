@@ -493,11 +493,13 @@ func featureChoices(d *draft, a Answers) []choice {
 		}
 		defaults = append(defaults, FeatSmoke)
 	} else {
-		if a.Database == "postgres" {
-			opts = append(opts,
-				choice{"Encrypted, verified backups with retention", FeatBackup},
-				choice{"Monthly restore test of the newest backup", FeatRestoreTest})
-			defaults = append(defaults, FeatBackup, FeatRestoreTest)
+		if a.Database == "postgres" || a.Database == "mysql" {
+			opts = append(opts, choice{"Encrypted, verified backups with retention", FeatBackup})
+			defaults = append(defaults, FeatBackup)
+		}
+		if a.Database == "postgres" { // the restore test supports PostgreSQL only
+			opts = append(opts, choice{"Monthly restore test of the newest backup", FeatRestoreTest})
+			defaults = append(defaults, FeatRestoreTest)
 		}
 		opts = append(opts,
 			choice{"Supervision every 5 minutes, alerts to Slack", FeatMonitor},

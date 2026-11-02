@@ -397,6 +397,9 @@ func dockerfiles(dir string) []string {
 	for _, pattern := range []string{"Dockerfile*", "docker/Dockerfile*", "docker/*/Dockerfile*"} {
 		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
 		for _, m := range matches {
+			if strings.HasSuffix(m, ".dockerignore") { // Dockerfile.dockerignore is the ignore file of a Dockerfile, not a Dockerfile
+				continue
+			}
 			if rel, err := filepath.Rel(dir, m); err == nil {
 				out = append(out, filepath.ToSlash(rel))
 			}

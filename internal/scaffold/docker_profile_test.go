@@ -20,8 +20,9 @@ func ibexaDockerFiles() map[string]string {
 			"FROM php-base AS build\nRUN composer install\n" +
 			"FROM php-base AS php\nCOPY --from=build /app /app\n" +
 			"FROM nginx:1.27 AS web\nCOPY --from=build /app/public /app/public\n",
-		"docker/varnish/Dockerfile": "FROM debian:bookworm-slim\n",
-		"docker/solr/Dockerfile":    "FROM solr:8.11.2\n",
+		"docker/Dockerfile.dockerignore": "**\n",
+		"docker/varnish/Dockerfile":      "FROM debian:bookworm-slim\n",
+		"docker/solr/Dockerfile":         "FROM solr:8.11.2\n",
 		"docker/docker-compose.prod.yml": `services:
   varnish: {image: "${REGISTRY:?missing}/acme-varnish:${APP_VERSION:?missing}"}
   web:     {image: "${REGISTRY}/acme-web:${APP_VERSION}"}
@@ -96,6 +97,39 @@ func TestABundleThatIsOnlyADependencyIsFoundByItsConfiguration(t *testing.T) {
 	f = Detect(files(t, content))
 	if !f.JWT || !slices.Contains(f.Console, "ibexa:graphql:generate-schema") {
 		t.Errorf("their configuration files say the project uses them: jwt %v console %v", f.JWT, f.Console)
+	}
+}
+
+func TestADockerignoreFileIsNotADockerfile(t *testing.T) {
+	f := Detect(files(t, ibexaDockerFiles()))
+	if !slices.Equal(f.Dockerfiles, []string{"docker/Dockerfile", "docker/solr/Dockerfile", "docker/varnish/Dockerfile"}) {
+		t.Errorf("Dockerfiles = %v: the ignore file next to a Dockerfile is not offered as an image", f.Dockerfiles)
+	}
+}
+
+// The form must offer what the defaults chose: a MariaDB stack gets backups (the restore test is PostgreSQL-only), a PostgreSQL stack both.
+func TestTheFormOffersBackupsForMySQLButTheRestoreTestOnlyForPostgres(t *testing.T) {
+	values := func(opts []choice) []string {
+		var out []string
+		for _, o := range opts {
+			out = append(out, o.Value)
+		}
+		return out
+	}
+	my := DefaultAnswers(Detect(files(t, ibexaDockerFiles())))
+	d := &draft{runtime: RuntimeCompose, features: my.Features}
+	opts := values(featureChoices(d, my))
+	if !slices.Contains(opts, FeatBackup) || slices.Contains(opts, FeatRestoreTest) {
+		t.Errorf("MariaDB: backups yes, restore test no: %v", opts)
+	}
+	if !slices.Contains(d.features, FeatBackup) || !slices.Contains(d.features, FeatMonitor) {
+		t.Errorf("the defaults are kept on screen: %v", d.features)
+	}
+
+	pg := composeAnswers(t) // PostgreSQL
+	d = &draft{runtime: RuntimeCompose, features: pg.Features}
+	if opts := values(featureChoices(d, pg)); !slices.Contains(opts, FeatBackup) || !slices.Contains(opts, FeatRestoreTest) {
+		t.Errorf("PostgreSQL: both: %v", opts)
 	}
 }
 
