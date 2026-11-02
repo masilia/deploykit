@@ -10,6 +10,12 @@ all of it.
 
 ## [Unreleased]
 
+### Fixed
+- The release archives now include `LICENSE` (Apache-2.0) and `CHANGELOG.md`; they used to carry only the README.
+
+### Changed
+- In the archives, `dk` is a link to `deploykit` instead of a second copy of the binary: each archive is half the size.
+
 ## [0.5.0] - 2026-11-02
 
 ### Added

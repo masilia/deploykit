@@ -6,23 +6,11 @@ before:
   hooks:
     - go mod tidy
 
-# Two binaries from the same main package: `deploykit` and its short alias `dk`.
+# One binary. Its short alias `dk` is a link to it inside the archive (packaging/dk), not a second copy.
 builds:
   - id: deploykit
     main: ./cmd/deploykit
     binary: deploykit
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin]
-    goarch: [amd64, arm64]
-    flags: [-trimpath]
-    ldflags:
-      - -s -w
-      - -X github.com/masilia/deploykit/internal/version.Version={{ .Version }}
-      - -X github.com/masilia/deploykit/internal/version.Commit={{ .ShortCommit }}
-      - -X github.com/masilia/deploykit/internal/version.Date={{ .Date }}
-  - id: dk
-    main: ./cmd/deploykit
-    binary: dk
     env: [CGO_ENABLED=0]
     goos: [linux, darwin]
     goarch: [amd64, arm64]
@@ -37,7 +25,12 @@ archives:
   - id: default
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files: [README.md]
+    # The licence travels with the binary (Apache-2.0), and the changelog tells what changed.
+    files:
+      - { src: packaging/dk, dst: ., strip_parent: true }
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
 
 checksum:
   name_template: checksums.txt
