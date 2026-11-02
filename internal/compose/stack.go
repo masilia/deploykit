@@ -111,12 +111,32 @@ func (s *Stack) RunApp(ctx context.Context, name string, env *envfile.Doc, out i
 // RunShell runs a command line in a one-off container of the app service (`compose run --rm svc sh -c …`). Templates
 // in command see the server .env as env.*, and every interpolated value is shell-quoted.
 func (s *Stack) RunShell(ctx context.Context, command string, envFrom map[string]string, env *envfile.Doc, out io.Writer) error {
+	return s.shell(ctx, false, command, envFrom, env, out)
+}
+
+// RunAppRunning is RunApp in the container that is already running (`compose exec -T svc sh -c …`): same templates, same
+// secrets through the environment, but no new container, so it sees what the running service sees.
+func (s *Stack) RunAppRunning(ctx context.Context, name string, env *envfile.Doc, out io.Writer) error {
+	cmd, ok := s.Cfg.App.Commands[name]
+	if !ok {
+		return fmt.Errorf("app command %q is not declared in the manifest", name)
+	}
+	if err := s.shell(ctx, true, cmd.Run, cmd.EnvFrom, env, out); err != nil {
+		return fmt.Errorf("app command %s: %w", name, err)
+	}
+	return nil
+}
+
+func (s *Stack) shell(ctx context.Context, running bool, command string, envFrom map[string]string, env *envfile.Doc, out io.Writer) error {
 	run, err := tmpl.Render(command, tmpl.Vars{"env": envMap(env)}, true)
 	if err != nil {
 		return err
 	}
 	secrets := map[string]string{}
 	args := []string{"run", "--rm"}
+	if running {
+		args = []string{"exec", "-T"}
+	}
 	for variable, key := range envFrom {
 		value := env.Get(key, "")
 		if value == "" {

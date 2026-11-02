@@ -193,13 +193,25 @@ func (a *app) deployCmd() *cobra.Command {
 // runCmd runs a named command of the manifest in the live release.
 func (a *app) runCmd() *cobra.Command {
 	var target string
+	var execRunning bool
 	cmd := &cobra.Command{
-		Use:   "run <command>",
-		Short: "Run a named command of runtime.commands in the live release (php-fpm): reindex, clear the cache, migrate…",
-		Args:  cobra.ExactArgs(1),
+		Use:   "run [command]",
+		Short: "Run a named command of the manifest on a target: php-fpm runtime.commands in the live release, compose app.commands in the stack",
+		Long: "php-fpm: runs a command of runtime.commands in the live release as the site user.\n" +
+			"compose: runs a command of runtime.app.commands in a one-off container of the app service (docker compose run --rm), or with --exec in\n" +
+			"the container that is already running. Without a command, it lists the ones the manifest declares. Secrets a command takes from the\n" +
+			"server .env (env_from) reach it through the environment, never on a command line. The hooks of an update (after_migrate) are not run:\n" +
+			"name each command you want. It refuses while an update, an install or a backup holds the operations lock.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signalContext(cmd)
 			defer stop()
+			if m, err := a.load(); err == nil && m.m.Runtime.Type == manifest.RuntimeCompose {
+				return a.runCompose(ctx, cmd, target, args, execRunning)
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("name the command to run (a key of runtime.commands)")
+			}
 			p, t, err := a.nodeProject(target)
 			if err != nil {
 				return err
@@ -212,6 +224,7 @@ func (a *app) runCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&target, "target", "t", "", "target id")
+	cmd.Flags().BoolVar(&execRunning, "exec", false, "compose: run in the running container of the app service instead of a one-off one")
 	return cmd
 }
 

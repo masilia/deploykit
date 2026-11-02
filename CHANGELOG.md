@@ -10,6 +10,9 @@ all of it.
 
 ## [Unreleased]
 
+### Added
+- **`deploykit run` for the compose runtime**: runs a command of `runtime.app.commands` (`migrate`, `reindex`, `cache_clear`, …) on a target from your workstation, in a one-off container of the app service, or with `--exec` in the running one. Without a name it lists the commands. A command's secrets come from the server `.env` through the environment, never a command line; it refuses while an update, an install or a backup holds the operations lock; `--dry-run` starts nothing. The update hooks are not run.
+
 ## [0.5.1] - 2026-11-02
 
 ### Fixed

@@ -178,6 +178,6 @@ first, `.status` files instead of mtimes, one `rsync` trailing-slash rule for mi
 `fleet status`, `healthcheck` and `deploy` work for pm2 and php-fpm targets too (`fleet backups` is compose-only). SSH retries are done: a connection that cannot be established is retried twice (2 s, then 4 s; `ssh.retries`, `ssh.connect_timeout`), an rsync that was interrupted is retried, and a session that breaks while a script runs is reported as such, never replayed (a script can repeat its effects).
 
 - The standalone (certbot) ingress and `renew-certs` have not run on a real host; neither has a reboot test of the pm2 systemd unit and the crons.
-- The Docker stack for PHP projects (`examples/php-ibexa-docker`) has run on a server only as a throwaway instance (clean database), and no `deploykit run` exists for the compose runtime yet (one-off commands go through `docker compose run`).
+- The Docker stack for PHP projects (`examples/php-ibexa-docker`) has run on a server only as a throwaway instance (clean database).
 - The Bubble Tea TUI for deploys (the plain renderer is complete); `init` and `target add` use `huh` forms.
 - Restore from a backup (the database tooling stays a separate project).

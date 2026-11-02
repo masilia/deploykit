@@ -45,6 +45,6 @@ CloudPanel-side file for them, because the deployment root is outside the site's
 
 ## Limits
 - Run on a shared host as a throwaway instance, with `release`, `bootstrap`, `deploy --install`, an update, a rollback, HTTPS and the purge (docs/validation.md, round 5), but with a clean database: the project's own migrations were not run.
-- No `deploykit run` for the compose runtime: one-off commands (`ibexa:install`, `reindex`) go through `docker compose run --rm php …`.
+- `deploykit run` runs the commands of `runtime.app.commands` (`migrate`, `graphql`, `cache_clear`, `reindex`, …) in a one-off container of the `php` service, or with `--exec` in the running one. It does not run the update hooks, and `ibexa:install` is not a declared command: it is a one-time act on an empty database, run by hand with `docker compose run --rm php …`.
 - `restore_test` supports PostgreSQL only: this profile has none; backups use `mariadb-dump` and are verified by its closing line.
 - Importing an existing database is out of scope.

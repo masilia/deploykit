@@ -243,13 +243,21 @@ func (a *app) envSetCmd() *cobra.Command {
 	return cmd
 }
 
+// lockHeld says whether an operation (an update, an install, a backup) holds the operations lock of the deployment root.
+func (ec *envContext) lockHeld(ctx context.Context) bool {
+	lock := ec.cfg.Lock
+	if lock == "" {
+		return false
+	}
+	_, err := ec.site.Run(ctx, transport.Spec{Argv: []string{"test", "-e", strings.TrimSuffix(ec.t.Get("path"), "/") + "/" + lock}})
+	return err == nil
+}
+
 // applyEnv recreates what the new .env changes. It refuses while an operation holds the lock: an update in progress is
 // about to start or stop the same containers.
 func (a *app) applyEnv(ctx context.Context, ec *envContext, out io.Writer) error {
-	if lock := ec.cfg.Lock; lock != "" {
-		if _, err := ec.site.Run(ctx, transport.Spec{Argv: []string{"test", "-e", strings.TrimSuffix(ec.t.Get("path"), "/") + "/" + lock}}); err == nil {
-			return fmt.Errorf("an operation holds the lock (%s): the .env is saved; apply it when the operation is over", lock)
-		}
+	if ec.lockHeld(ctx) {
+		return fmt.Errorf("an operation holds the lock (%s): the .env is saved; apply it when the operation is over", ec.cfg.Lock)
 	}
 	_, _ = fmt.Fprintln(out, "recreating the services whose environment changed")
 	_, err := ec.stack.Run(ctx, out, "up", "-d")

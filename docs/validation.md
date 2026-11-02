@@ -145,6 +145,7 @@ certificate issued, so the last rows were measured through HTTPS.
 | HTTPS through CloudPanel | Let's Encrypt certificate (verified chain), `/` redirects to `https://<domain>/login` (the scheme survives the proxies), HTTP redirects to HTTPS, Varnish is in the circuit |
 | Cache and purge on that chain | A page is a MISS, then a HIT; a hard purge with the right token answers 200 and the next request is a MISS again; a wrong token, no token, and a plain `PURGE` from the internet through CloudPanel all answer 405 |
 | `env list`, `get`, `set --apply` | The listing masks the five secrets (length only); a secret needs `--reveal`; a managed key is refused; changing one variable with `--apply` recreated only the service that uses it (the others kept their uptime) and the site kept answering; the value was restored the same way |
+| `run` (compose) | The commands of the manifest are listed; `cache_clear` and `reindex` ran in a one-off container and `--exec` in the running one (no container left behind); a failing migration came back with exit code 1 and its message; with the operations lock held it refused and started nothing, and it ran again once the lock was gone; `--dry-run` started nothing |
 | Before/after comparison with the host | Only the instance's own resources differ: vhost, user, port, CloudPanel site and certificate, containers, volumes, network, cron block, files |
 
 Findings (the first is fixed, with a regression test):
