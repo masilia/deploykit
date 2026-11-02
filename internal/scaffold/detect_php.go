@@ -33,6 +33,12 @@ func detectPHP(dir string, f *Findings) bool {
 		f.PHPVersion = phpMinor(c.Require["php"])
 		f.Encore = c.Require["symfony/webpack-encore-bundle"] != "" || f.Framework == "ibexa" && fileExists(filepath.Join(app, "package.json"))
 		f.Console = consoleCommands(c.Require)
+		// A bundle that arrives as a dependency of the framework is not in composer.json, but its configuration file is in the project.
+		f.JWT = c.Require["lexik/jwt-authentication-bundle"] != "" || fileExists(filepath.Join(app, "config", "packages", "lexik_jwt_authentication.yaml"))
+		if f.Framework == "ibexa" && fileExists(filepath.Join(app, "config", "packages", "graphql.yaml")) {
+			f.Console = appendOnce(f.Console, "ibexa:graphql:generate-schema")
+			sort.Strings(f.Console)
+		}
 		f.pkgName = c.Name[strings.LastIndex(c.Name, "/")+1:]
 		if f.Framework == "ibexa" {
 			f.pkgName = "" // the skeleton is called oss-skeleton: the folder or the repository names the project better

@@ -11,7 +11,19 @@ all of it.
 ## [Unreleased]
 
 ### Added
+- **`deploykit init` for Docker stacks with their Dockerfiles in `docker/`** (the Ibexa profile and any compose project laid out like it): it finds the compose
+  files in `docker/` and sets `project_directory`; matches the images a compose file takes from the registry to their Dockerfile, build context and, for a
+  multi-stage Dockerfile, the stage to build (`target`); recognises the roles `edge` (Varnish) and `search` (Solr, Elasticsearch, OpenSearch, Meilisearch, Typesense);
+  writes the app commands of an Ibexa project (`migrate`, `graphql`, `jwt_keypair`, `reindex`, `cache_clear`) and the `jwt_keypair` install step; turns the
+  `CHANGE_ME` placeholders of the env template into generated `secrets` or `prompts`; and syncs only the compose file, the env template and the folders the stack
+  mounts from the host. It says when the images were matched by name, and which image no Dockerfile matches.
+- The generated backup supports MariaDB and MySQL (`mariadb-dump` or `mysqldump`, the password taken from the container's own environment, a dump verified by its
+  closing line). The restore test stays PostgreSQL-only and is not generated for them.
 - **`deploykit run` for the compose runtime**: runs a command of `runtime.app.commands` (`migrate`, `reindex`, `cache_clear`, …) on a target from your workstation, in a one-off container of the app service, or with `--exec` in the running one. Without a name it lists the commands. A command's secrets come from the server `.env` through the environment, never a command line; it refuses while an update, an install or a backup holds the operations lock; `--dry-run` starts nothing. The update hooks are not run.
+
+### Changed
+- `init` no longer archives the volumes of the database, the cache and the search engine with the application's files (`data.volumes`): the database has its dump and the
+  others can be rebuilt.
 
 ## [0.5.1] - 2026-11-02
 

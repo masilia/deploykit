@@ -5,6 +5,7 @@ package scaffold
 import (
 	"encoding/json"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -31,6 +32,15 @@ type Service struct {
 	Image string
 }
 
+// ImageRef is one image to build from a Dockerfile: its name in the registry, the Dockerfile, the build context and, for a
+// multi-stage Dockerfile, the stage to build.
+type ImageRef struct {
+	Name       string
+	Dockerfile string
+	Context    string // "" means the repository root
+	Target     string // "" builds the last stage
+}
+
 // Findings is what Detect learned. Every value is only a default: the form lets the user change it.
 type Findings struct {
 	Dir         string
@@ -49,7 +59,13 @@ type Findings struct {
 	Volumes      []string
 	Database     string // postgres, mysql or empty
 	Dockerfiles  []string
-	EnvTemplate  string // an example .env found in the repository
+	EnvTemplate  string   // an example .env found in the repository
+	EnvKeys      []string // the variables of that template that still say CHANGE_ME
+	Images       []ImageRef
+	ImageNotes   []string // registry images no Dockerfile was found for
+	BindDirs     []string // top-level folders the compose file mounts from the host: they must reach the server
+	DBImage      string
+	JWT          bool // the project uses lexik/jwt-authentication-bundle: a key pair has to exist
 
 	// PHP projects
 	PHPDir     string   // the folder holding composer.json, relative to the repository ("" or "ibexa")
@@ -89,11 +105,15 @@ func Detect(dir string) Findings {
 	compose := detectCompose(dir, &f)
 	php := detectPHP(dir, &f)
 	f.Dockerfiles = dockerfiles(dir)
-	for _, c := range []string{"deployment/.env.example", ".env.example", ".env.prod.example", ".env.production.example"} {
+	for _, c := range []string{"deployment/.env.example", ".env.example", ".env.prod.example", ".env.production.example", "docker/.env.example"} {
 		if _, err := os.Stat(filepath.Join(dir, c)); err == nil {
 			f.EnvTemplate = c
+			f.EnvKeys = envPlaceholders(filepath.Join(dir, c))
 			break
 		}
+	}
+	if compose {
+		mapImages(dir, &f)
 	}
 
 	switch {
@@ -203,28 +223,32 @@ type composeFile struct {
 }
 
 type composeService struct {
-	Image string `yaml:"image"`
+	Image   string `yaml:"image"`
+	Volumes []any  `yaml:"volumes"`
 }
 
 // detectCompose finds the compose files at the top level and in docker/, puts the production one first, and reads the
 // services and named volumes of that file.
 func detectCompose(dir string, f *Findings) bool {
 	var found []string
-	for _, pattern := range []string{"docker-compose*.yml", "docker-compose*.yaml", "compose*.yml", "compose*.yaml"} {
+	for _, pattern := range []string{"docker-compose*.yml", "docker-compose*.yaml", "compose*.yml", "compose*.yaml",
+		"docker/docker-compose*.yml", "docker/docker-compose*.yaml", "docker/compose*.yml", "docker/compose*.yaml"} {
 		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
 		for _, m := range matches {
-			found = append(found, filepath.Base(m))
+			if rel, err := filepath.Rel(dir, m); err == nil {
+				found = append(found, filepath.ToSlash(rel))
+			}
 		}
 	}
 	if len(found) == 0 {
 		return false
 	}
-	sort.SliceStable(found, func(i, j int) bool { return composeRank(found[i]) < composeRank(found[j]) })
+	sort.SliceStable(found, func(i, j int) bool { return composeRank(path.Base(found[i])) < composeRank(path.Base(found[j])) })
 	found = dedupe(found)
 	f.ComposeFiles = found
 
 	var cf composeFile
-	data, err := os.ReadFile(filepath.Join(dir, found[0])) //nolint:gosec // a file of the project being scaffolded
+	data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(found[0]))) //nolint:gosec // a file of the project being scaffolded
 	if err != nil || yaml.Unmarshal(data, &cf) != nil {
 		return true
 	}
@@ -234,19 +258,73 @@ func detectCompose(dir string, f *Findings) bool {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	dataVolumes := map[string]bool{} // volumes of the database, the cache and the search engine: not archived with the files
 	for _, n := range names {
 		svc := Service{Name: n, Image: cf.Services[n].Image}
 		svc.Role = GuessRole(n, svc.Image)
 		if svc.Role == "db" && f.Database == "" {
 			f.Database = databaseOf(svc.Image + " " + n)
+			f.DBImage = svc.Image
 		}
 		f.Services = append(f.Services, svc)
+		for _, v := range cf.Services[n].Volumes {
+			if dir := bindDir(v); dir != "" {
+				f.BindDirs = append(f.BindDirs, dir)
+			}
+			if name := namedVolume(v); name != "" && (svc.Role == "db" || svc.Role == "cache" || svc.Role == "search" || svc.Role == "edge") {
+				dataVolumes[name] = true
+			}
+		}
 	}
 	for v := range cf.Volumes {
-		f.Volumes = append(f.Volumes, v)
+		if !dataVolumes[v] {
+			f.Volumes = append(f.Volumes, v)
+		}
 	}
 	sort.Strings(f.Volumes)
+	f.BindDirs = dedupe(f.BindDirs)
+	sort.Strings(f.BindDirs)
 	return true
+}
+
+// namedVolume returns the name of the named volume a service volume mounts ("db_data:/var/lib/mysql" gives "db_data"), or "" for a
+// bind mount.
+func namedVolume(v any) string {
+	src := ""
+	switch t := v.(type) {
+	case string:
+		src, _, _ = strings.Cut(t, ":")
+	case map[string]any:
+		if t["type"] == "volume" {
+			src, _ = t["source"].(string)
+		}
+	}
+	if src == "" || strings.HasPrefix(src, ".") || strings.HasPrefix(src, "/") || strings.HasPrefix(src, "~") {
+		return ""
+	}
+	return src
+}
+
+// bindDir returns the top-level folder a service volume mounts from the host ("./docker/nginx/x.conf:/etc/x" gives
+// "docker/"), or "" for a named volume or a single file at the root.
+func bindDir(v any) string {
+	src := ""
+	switch t := v.(type) {
+	case string:
+		src, _, _ = strings.Cut(t, ":")
+	case map[string]any:
+		if t["type"] == "bind" {
+			src, _ = t["source"].(string)
+		}
+	}
+	if !strings.HasPrefix(src, "./") {
+		return ""
+	}
+	first, rest, ok := strings.Cut(strings.TrimPrefix(src, "./"), "/")
+	if !ok || rest == "" || first == "" || first == "." {
+		return ""
+	}
+	return first + "/"
 }
 
 // composeRank orders compose files: production first, then the base file, then overrides.
@@ -291,6 +369,10 @@ func GuessRole(name, image string) string {
 		return "db"
 	case has(img, "redis", "valkey", "memcached") || n == "redis" || n == "cache":
 		return "cache"
+	case has(img, "solr", "elasticsearch", "opensearch", "meilisearch", "typesense") || n == "solr" || n == "search":
+		return "search"
+	case has(img, "varnish") || n == "varnish":
+		return "edge"
 	case has(img, "mercure") || n == "hub" || n == "mercure":
 		return "realtime"
 	case has(img, "nginx", "caddy", "traefik", "haproxy") || n == "proxy" || n == "nginx" || n == "web":

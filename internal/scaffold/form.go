@@ -174,7 +174,7 @@ func (d *draft) apply(a *Answers) error {
 	} else {
 		a.ComposeFiles = []string{strings.TrimSpace(d.composeFile)}
 		a.AppService, a.MigrateCommand = d.appService, strings.TrimSpace(d.migrate)
-		a.Images = imagesFrom(d.dockerfiles, d.dockerfile)
+		a.Images = imagesFrom(d.dockerfiles, d.dockerfile, a.Images)
 		if len(a.Services) == 0 {
 			a.Services = parseServices(d.servicesText)
 		}
@@ -185,25 +185,12 @@ func (d *draft) apply(a *Answers) error {
 	return errors.Join(errs...)
 }
 
-// imagesFrom names an image after each chosen Dockerfile, keeping the names unique.
-func imagesFrom(chosen []string, typed string) []ImageRef {
+// imagesFrom lists the images of the chosen Dockerfiles (or of the one typed), keeping what detection tied to them.
+func imagesFrom(chosen []string, typed string, detected []ImageRef) []ImageRef {
 	if len(chosen) == 0 && strings.TrimSpace(typed) != "" {
 		chosen = []string{strings.TrimSpace(typed)}
 	}
-	var out []ImageRef
-	used := map[string]int{}
-	for _, df := range chosen {
-		name := imageName(df)
-		if name == "" {
-			name = "app"
-		}
-		if n := used[name]; n > 0 {
-			name += "-" + strconv.Itoa(n+1)
-		}
-		used[imageName(df)]++
-		out = append(out, ImageRef{Name: name, Dockerfile: df})
-	}
-	return out
+	return ImagesFor(chosen, detected)
 }
 
 // parseServices reads "web:proxy, app:app, db:db"; a bare name gets the role its name suggests.

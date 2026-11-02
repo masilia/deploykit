@@ -92,10 +92,7 @@ func (f *answerFlags) override(cmd *cobra.Command, a *scaffold.Answers) {
 		a.ComposeFiles = []string{f.composeFile}
 	}
 	if set("dockerfile") {
-		a.Images = nil
-		for _, df := range f.dockerfiles {
-			a.Images = append(a.Images, scaffold.ImageRef{Name: scaffold.ImageName(df), Dockerfile: df})
-		}
+		a.Images = scaffold.ImagesFor(f.dockerfiles, a.Images)
 	}
 	if set("features") {
 		a.Features = nil
@@ -183,6 +180,9 @@ func (a *app) runInit(cmd *cobra.Command, f *answerFlags) error {
 
 	if ans.Full && !ask {
 		_, _ = fmt.Fprintln(a.out, st.Caution("this project uses %s: the native CloudPanel profile below is for a simple installation (legacy search, files); full dependencies fit a Docker stack", strings.Join(ans.FullReasons, ", ")))
+	}
+	for _, note := range ans.Notes {
+		_, _ = fmt.Fprintln(a.out, st.Caution("%s", note))
 	}
 	if ask {
 		_, _ = fmt.Fprint(a.out, st.Banner("deploykit init", "Create the configuration of this project in "+dir))

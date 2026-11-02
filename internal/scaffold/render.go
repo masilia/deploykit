@@ -70,15 +70,82 @@ func (v view) hasRole(role string) bool {
 	return slices.ContainsFunc(v.Services, func(s Service) bool { return s.Role == role })
 }
 
+var (
+	// generatedName matches the variables deploykit can fill with random bytes. A DSN or a URL cannot be generated: it is asked for.
+	generatedName = regexp.MustCompile(`(?i)(SECRET|PASSWORD|PASSPHRASE|TOKEN)`)
+	longName      = regexp.MustCompile(`(?i)(SECRET|TOKEN)`)
+	// managedKeys are written by deploykit itself, never asked for.
+	managedKeys = map[string]bool{"REGISTRY": true, "APP_VERSION": true, "APP_VERSION_PREV": true, "PROXY_PORT": true}
+)
+
+// Secrets are the variables generated on the first install: the placeholders of the env template that look like secrets, then
+// the database password and the backup passphrase the chosen features need.
 func (v view) Secrets() []secret {
 	var out []secret
+	seen := map[string]bool{}
+	add := func(key string, n int) {
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, secret{key, n})
+		}
+	}
+	for _, k := range v.EnvKeys {
+		if generatedName.MatchString(k) {
+			n := 16
+			if longName.MatchString(k) {
+				n = 32
+			}
+			add(k, n)
+		}
+	}
 	if v.Database == "postgres" {
-		out = append(out, secret{"POSTGRES_PASSWORD", 16})
+		add("POSTGRES_PASSWORD", 16)
 	}
 	if v.Has(FeatBackup) {
-		out = append(out, secret{"BACKUP_PASSPHRASE", 16})
+		add("BACKUP_PASSPHRASE", 16)
 	}
 	return out
+}
+
+// Prompts are the placeholders of the env template that are neither generated nor managed by deploykit: the operator sets them
+// in the server .env before the installation (the domain, the hosts, the recipients…).
+func (v view) Prompts() []string {
+	var out []string
+	for _, k := range v.EnvKeys {
+		if !managedKeys[k] && !generatedName.MatchString(k) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// DBType is the type written in data.database: the backup command depends on it.
+func (v view) DBType() string {
+	if v.Database == "mysql" {
+		return "mysql"
+	}
+	return "postgres"
+}
+
+// DBDump is the command that writes a dump to stdout, run inside the database container. The password comes from the container's
+// own environment, never from a command line.
+func (v view) DBDump() string {
+	switch {
+	case v.Database == "mysql" && strings.Contains(strings.ToLower(v.DBImage), "mariadb"):
+		return `MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-dump -u root --single-transaction --routines --default-character-set=utf8mb4 "$MARIADB_DATABASE"`
+	case v.Database == "mysql":
+		return `MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -u root --single-transaction --routines --default-character-set=utf8mb4 "$MYSQL_DATABASE"`
+	}
+	return `pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"`
+}
+
+// DBVerify reads a dump on stdin and fails when it is unreadable: pg_restore lists a PostgreSQL archive; a MySQL dump is text that
+// ends with a line saying it completed.
+func (v view) DBVerify() string {
+	if v.Database == "mysql" {
+		return "tail -n 5 | grep -q 'Dump completed'"
+	}
+	return "pg_restore -l"
 }
 
 func (v view) UpdateSteps() []string {
@@ -106,6 +173,9 @@ func (v view) InstallSteps() []string {
 		steps = append(steps, "secrets")
 	}
 	steps = append(steps, "images_pull", "up_data")
+	if slices.ContainsFunc(v.AppCommands, func(c NamedCommand) bool { return c.Name == "jwt_keypair" }) {
+		steps = append(steps, "jwt_keypair")
+	}
 	if v.MigrateCommand != "" {
 		steps = append(steps, "migrate")
 	}
@@ -143,8 +213,19 @@ func scalar(s string) string {
 	return string(b)
 }
 
+// singleQuoted writes s as a YAML single-quoted scalar, which keeps a shell command readable; a command that holds a single quote
+// is double-quoted instead.
+func singleQuoted(s string) string {
+	if strings.Contains(s, "'") {
+		b, _ := json.Marshal(s)
+		return string(b)
+	}
+	return "'" + s + "'"
+}
+
 var funcs = template.FuncMap{
-	"q": scalar,
+	"q":  scalar,
+	"sq": singleQuoted,
 	// flow writes a list as a YAML flow sequence.
 	"flow": func(items []string) string {
 		out := make([]string, len(items))

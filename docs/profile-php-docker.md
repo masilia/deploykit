@@ -39,6 +39,15 @@ stack behind CloudPanel. Only Varnish publishes a port.
 - `ibexa:install` on an empty database, then `ibexa:reindex` into Solr, worked; the clean data gives the anonymous user no `user/login` on the project's siteaccess,
   so every Symfony route redirects to `/login` until a real database is loaded.
 
+## Starting from `deploykit init`
+`deploykit init` recognises this layout and writes the manifest: the compose file in `docker/` (so `project_directory: .`), the images the file takes from the
+registry matched to their Dockerfile (a folder named after the image, or a stage of a multi-stage Dockerfile that nothing else builds on, as `--target`),
+the roles (`edge` for Varnish, `search` for Solr, `proxy` for nginx), the app commands of an Ibexa project (`migrate`, `graphql`, `jwt_keypair`, `reindex`,
+`cache_clear`), the placeholders of the env template (`CHANGE_ME` secrets generated, the rest asked for in `prompts`), a MariaDB or MySQL backup (and no
+restore test, which supports PostgreSQL only), and a `sync.files` limited to the compose file and the env template. The matching is by name: check the
+context and target of each image in `artifact.images`, which `init` says. Run on a copy of the reference project, it produced a manifest that validates and
+differs from the hand-written one by the build context of the Solr image.
+
 ## Variables
 The server `.env` is managed with `deploykit env` (list, get, set, `--apply`) and the git-ignored `secrets/<target>.env`: see [targets.md](targets.md). The project keeps no
 CloudPanel-side file for them, because the deployment root is outside the site's home on purpose.

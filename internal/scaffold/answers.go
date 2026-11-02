@@ -49,12 +49,6 @@ type Target struct {
 	TLSMode string
 }
 
-// ImageRef is one image built from a Dockerfile.
-type ImageRef struct {
-	Name       string
-	Dockerfile string
-}
-
 // NamedCommand is a command of runtime.commands.
 type NamedCommand struct{ Name, Run string }
 
@@ -81,16 +75,21 @@ type Answers struct {
 	Keep        int      // releases kept on the server
 
 	// compose
-	ComposeFiles   []string
-	Override       string // compose file added when the target uses CloudPanel (TLS_MODE=cloudpanel)
-	Services       []Service
-	Images         []ImageRef
-	AppService     string // service the app commands run in
-	MigrateCommand string // optional: run after pulling, before restarting
-	Database       string // postgres, mysql or empty
-	Volumes        []string
-	EnvTemplate    string // optional .env template in the repository, copied on first install
-	SyncDirs       []string
+	ProjectDirectory string // "." when the compose files live in a subfolder while the server .env stays in the root
+	ComposeFiles     []string
+	Override         string // compose file added when the target uses CloudPanel (TLS_MODE=cloudpanel)
+	Services         []Service
+	Images           []ImageRef
+	AppService       string         // service the app commands run in
+	MigrateCommand   string         // optional: run after pulling, before restarting
+	AppCommands      []NamedCommand // app.commands of a framework project (migrate, graphql, reindex…), migrate first
+	Database         string         // postgres, mysql or empty
+	DBImage          string         // the database image: tells MariaDB from MySQL
+	EnvKeys          []string       // variables of the env template that still say CHANGE_ME
+	Notes            []string       // things detection could not settle, shown to the user
+	Volumes          []string
+	EnvTemplate      string // optional .env template in the repository, copied on first install
+	SyncDirs         []string
 
 	// php-fpm
 	PHPVersion string
@@ -137,9 +136,20 @@ func DefaultAnswers(f Findings) Answers {
 			a.SyncDirs = []string{"docker/"}
 		}
 		a.Services = f.Services
-		for _, df := range f.Dockerfiles {
-			a.Images = append(a.Images, ImageRef{Name: imageName(df), Dockerfile: df})
+		a.Images = slices.Clone(f.Images)
+		if len(a.Images) == 0 {
+			for _, df := range f.Dockerfiles {
+				a.Images = append(a.Images, ImageRef{Name: imageName(df), Dockerfile: df})
+			}
+		} else {
+			// Images taken from the registry: only the folders the compose file mounts reach the server, not the build files.
+			a.SyncDirs = f.BindDirs
+			a.Notes = append([]string{"the images were matched to Dockerfiles by name: check the context and target of each one in artifact.images"}, f.ImageNotes...)
 		}
+		if len(f.ComposeFiles) > 0 && path.Dir(f.ComposeFiles[0]) != "." {
+			a.ProjectDirectory = "."
+		}
+		a.DBImage, a.EnvKeys = f.DBImage, f.EnvKeys
 		for _, s := range f.Services {
 			if s.Role == "app" {
 				a.AppService = s.Name
@@ -149,8 +159,14 @@ func DefaultAnswers(f Findings) Answers {
 		a.Volumes = f.Volumes
 		a.EnvTemplate = f.EnvTemplate
 		a.Features = []string{FeatMonitor}
-		if f.Database == "postgres" {
+		switch f.Database {
+		case "postgres":
 			a.Features = []string{FeatBackup, FeatRestoreTest, FeatMonitor}
+		case "mysql": // the monthly restore proof supports PostgreSQL only
+			a.Features = []string{FeatBackup, FeatMonitor}
+		}
+		if f.Framework != "" {
+			a.AppCommands, a.MigrateCommand = composeAppCommands(f, a.Services)
 		}
 		a.Target = Target{SSHPort: 22, SSHUser: "deploy", ProxyPort: 8081}
 	case KindPHP:
@@ -230,6 +246,78 @@ func FillDefaults(a *Answers) {
 			t.Path = "/home/" + t.SiteUser + "/htdocs/" + t.Domain
 		}
 	}
+}
+
+// composeAppCommands turns the console commands of a framework project into app.commands: they run in the app container, so
+// they use the container's own `php`. The first migration command is `migrate`, which the update and install steps run.
+func composeAppCommands(f Findings, services []Service) ([]NamedCommand, string) {
+	var out []NamedCommand
+	migrate := ""
+	for _, c := range f.Console {
+		name, run := consoleCommand(c)
+		run = strings.ReplaceAll(run, "{{ php }}", "php")
+		switch c {
+		case "kaliop:migration:migrate", "doctrine:migrations:migrate":
+			if migrate != "" {
+				continue
+			}
+			name, migrate = "migrate", run
+		}
+		out = append(out, NamedCommand{name, run})
+	}
+	if f.JWT {
+		out = append(out, NamedCommand{"jwt_keypair", "php bin/console lexik:jwt:generate-keypair --skip-if-exists"})
+	}
+	if f.Framework == "ibexa" {
+		for _, s := range services {
+			switch s.Role {
+			case "search":
+				out = append(out, NamedCommand{"reindex", "php -d memory_limit=2G bin/console ibexa:reindex --no-interaction"})
+			case "cache":
+				out = append(out, NamedCommand{"cache_clear", "php bin/console cache:pool:clear cache.redis"})
+			}
+		}
+	}
+	slices.SortStableFunc(out, func(a, b NamedCommand) int {
+		switch {
+		case a.Name == "migrate" && b.Name != "migrate":
+			return -1
+		case b.Name == "migrate" && a.Name != "migrate":
+			return 1
+		}
+		return 0
+	})
+	return out, migrate
+}
+
+// ImagesFor lists the images to build for the Dockerfiles chosen. An image detection already tied to a chosen Dockerfile
+// keeps its name, context and stage (one multi-stage Dockerfile can give several images); a Dockerfile without one gets a
+// name from its own.
+func ImagesFor(chosen []string, detected []ImageRef) []ImageRef {
+	var out []ImageRef
+	have := map[string]bool{}
+	for _, d := range detected {
+		if slices.Contains(chosen, d.Dockerfile) {
+			out = append(out, d)
+			have[d.Dockerfile] = true
+		}
+	}
+	used := map[string]int{}
+	for _, df := range chosen {
+		if have[df] {
+			continue
+		}
+		name := imageName(df)
+		if name == "" {
+			name = "app"
+		}
+		if n := used[name]; n > 0 {
+			name += "-" + strconv.Itoa(n+1)
+		}
+		used[imageName(df)]++
+		out = append(out, ImageRef{Name: name, Dockerfile: df})
+	}
+	return out
 }
 
 // consoleCommand names a detected console command and gives its command line.
@@ -412,8 +500,11 @@ func (a Answers) Validate() error {
 		if a.AppService != "" && !slices.ContainsFunc(a.Services, func(s Service) bool { return s.Name == a.AppService }) {
 			add("the app service %q is not one of the services", a.AppService)
 		}
-		if (a.Has(FeatBackup) || a.Has(FeatRestoreTest)) && a.Database != "postgres" {
-			add("backups and the restore test need a PostgreSQL service")
+		if a.Has(FeatBackup) && a.Database != "postgres" && a.Database != "mysql" {
+			add("backups need a PostgreSQL, MySQL or MariaDB service")
+		}
+		if a.Has(FeatRestoreTest) && a.Database != "postgres" {
+			add("the restore test needs a PostgreSQL service")
 		}
 		if a.Has(FeatRestoreTest) && !a.Has(FeatBackup) {
 			add("the restore test needs backups")

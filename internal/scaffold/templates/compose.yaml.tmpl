@@ -21,7 +21,7 @@ artifact:
     create_tag_if_missing: true              # the tag is created on HEAD when absent
   images:
 [[- range .Images ]]
-    - { name: [[ q .Name ]], dockerfile: [[ q .Dockerfile ]], context: . }
+    - { name: [[ q .Name ]], dockerfile: [[ q .Dockerfile ]], context: [[ if .Context ]][[ q .Context ]][[ else ]].[[ end ]][[ if .Target ]], target: [[ q .Target ]][[ end ]] }
 [[- end ]]
   tags: ["{{ version }}", "sha-{{ commit7 }}"]
   ensure_release: true                       # `deploy` builds and pushes the images when the registry lacks them
@@ -30,13 +30,16 @@ artifact:
 runtime:
   type: compose
   min_compose: "2.24"
+[[- if .ProjectDirectory ]]
+  project_directory: [[ q .ProjectDirectory ]]                  # the compose files are in a subfolder; the server .env stays in the deployment root
+[[- end ]]
   files: [[ flow .RuntimeFiles ]]
 [[- if .OverrideWhenCloudPanel ]]
   overrides:
     - { when: "target.tls_mode == 'cloudpanel'", file: [[ q .Override ]] }
 [[- end ]]
 
-  services:                                  # roles: proxy, app, worker, db, cache, realtime
+  services:                                  # roles: proxy, edge, app, worker, db, cache, search, realtime
 [[- range .Services ]]
     - { name: [[ q .Name ]], role: [[ q .Role ]] }
 [[- end ]]
@@ -45,7 +48,11 @@ runtime:
   app:
     service: [[ q .AppService ]]
     commands:
-[[- if .MigrateCommand ]]
+[[- if .AppCommands ]]
+[[- range .AppCommands ]]
+      [[ .Name ]]: [[ q .Run ]]
+[[- end ]]
+[[- else if .MigrateCommand ]]
       migrate: [[ q .MigrateCommand ]]
 [[- else ]]
       # migrate: php bin/console doctrine:migrations:migrate -n   # add your command, then add `migrate` to the steps below
@@ -80,6 +87,9 @@ env:
 [[- if .EnvTemplate ]]
   template: [[ q .EnvTemplate ]]  # copied on first install, mode 600
 [[- end ]]
+[[- if .Prompts ]]
+  prompts: [[ flow .Prompts ]]  # to set in the server .env before the installation
+[[- end ]]
 [[- if .Secrets ]]
   secrets:                                   # generated when absent or CHANGE_ME*, never overwritten
 [[- range .Secrets ]]
@@ -91,10 +101,10 @@ env:
 # --- Backups (encrypted with gpg, verified before they are kept) ----------------------------------------------
 data:
   database:
-    type: postgres
+    type: [[ .DBType ]]
     service: [[ q .DBService ]]
-    dump: 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"'
-    verify: 'pg_restore -l'                  # an unreadable dump aborts the backup
+    dump: [[ sq .DBDump ]]
+    verify: [[ sq .DBVerify ]]      # an unreadable dump aborts the backup
 [[- if .Volumes ]]
   volumes: [[ flow .Volumes ]]  # archived through a throwaway container, read-only
 [[- end ]]
@@ -109,7 +119,7 @@ backup:
   offsite: { rsync_target: "{{ env.BACKUP_RSYNC_TARGET }}", optional: true, on_failure: warn }   # empty = no copy
   schedule: "30 2 * * *"
 [[ end ]]
-[[- if .Has "restore-test" ]]
+[[- if and (.Has "restore-test") (eq .DBType "postgres") ]]
 restore_test:                                # restores the newest backup into a throwaway database, then drops it
   schedule: "0 4 2 * *"
   throwaway_database: restore_check          # never the live database
