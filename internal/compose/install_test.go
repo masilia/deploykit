@@ -84,8 +84,16 @@ func TestInstallStandalone(t *testing.T) {
 	if strings.Contains(trace, "ghp_tok") {
 		t.Error("the registry token must travel on stdin only")
 	}
-	if len(notices) != 2 || !strings.Contains(notices[0], "BACKUP_PASSPHRASE") || !strings.Contains(notices[1], "APP_ENCRYPTION_KEY") {
+	if len(notices) != 3 || !strings.Contains(notices[0], "BACKUP_PASSPHRASE") || !strings.Contains(notices[1], "APP_ENCRYPTION_KEY") {
 		t.Errorf("the off-server reminders (backup passphrase, AI secret key) must be shown: %v", notices)
+	}
+	// The generic reminder names every secret the manifest generates and the command that reads one, never a value.
+	if len(notices) == 3 {
+		for _, want := range []string{"APP_SECRET", "POSTGRES_PASSWORD", "BACKUP_PASSPHRASE", "deploykit env get", "--reveal"} {
+			if !strings.Contains(notices[2], want) {
+				t.Errorf("the secrets reminder lacks %q: %s", want, notices[2])
+			}
+		}
 	}
 	// Every cron of the manifest is scheduled with the server binary.
 	var cron string

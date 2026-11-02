@@ -55,3 +55,21 @@ The inventory of other clients is never copied to a server (rule of the legacy s
   configuration file named by `global_config`. Put the token in the global file, never in a target.
 - `deploy` uploads the target's own file to the server as `.deploykit/target.env`, so the server knows its settings; the
   other targets of the inventory never leave the workstation.
+
+## Secrets and the server `.env` (compose targets)
+
+A target file holds no secret. The values a server needs (passwords, tokens, hosts, recipients) live in the server `.env`, mode 600,
+owned by the deploy user. Three ways to manage them, none of which needs a file manager:
+
+- **`secrets/<target>.env`**, next to the manifest, git-ignored (`init` adds it to `.gitignore`; the manifest's `sync.never` keeps it
+  off the server) and mode 600 (like an SSH key, a file readable by others is refused). `deploy` injects every `KEY=VALUE` line on
+  every run, before an explicit `--env` file, which wins.
+- **`deploykit env set -t <target> KEY`** reads the value from a hidden prompt or from stdin; `--from-file` takes several. The value
+  reaches the server on stdin, never in an argument, and is never printed back. It takes effect when the services are recreated:
+  `--apply` runs `docker compose up -d` at once (it refuses while an operation holds the lock), or the next deploy does.
+  `deploy` and `rollback` own `APP_VERSION` and `APP_VERSION_PREV`: `env set` refuses them.
+- **`deploykit env list -t <target>`** shows every variable, the secrets masked (a declared secret, a name that looks like one, or a URL
+  with a password in it); **`env get KEY --reveal`** prints one secret, for an off-server copy.
+
+The server holds the only copy of the secrets that deploykit generates, and the encrypted backups contain the `.env` that holds their
+own passphrase: keep a copy of those secrets elsewhere (the end of `install` lists them).

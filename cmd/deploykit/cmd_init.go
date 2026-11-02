@@ -202,7 +202,7 @@ func (a *app) runInit(cmd *cobra.Command, f *answerFlags) error {
 	}
 	var ignore []string
 	if ans.Runtime == scaffold.RuntimeCompose {
-		ignore = []string{"deploy.env"}
+		ignore = []string{"deploy.env", "secrets/"}
 	}
 	plan, err := scaffold.NewPlan(dir, files, ignore)
 	if err != nil {

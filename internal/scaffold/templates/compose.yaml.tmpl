@@ -161,7 +161,7 @@ ingress:
 # The server also receives the deploykit binary of the same version.
 sync:
   files: [[ flow .SyncFiles ]]
-  never: [deploy.env, targets/]              # other targets' inventory never reaches a server
+  never: [deploy.env, secrets/, targets/]    # secrets and other targets' inventory never reach a server
 
 fleet:
   rollout_order_key: ROLLOUT_ORDER           # ascending, default 50, then id

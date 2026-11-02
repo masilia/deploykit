@@ -144,6 +144,7 @@ certificate issued, so the last rows were measured through HTTPS.
 | Update whose migration fails | The project's migrations need data a clean install lacks. The update stopped before any restart: backup kept, lock released, the running version still served |
 | HTTPS through CloudPanel | Let's Encrypt certificate (verified chain), `/` redirects to `https://<domain>/login` (the scheme survives the proxies), HTTP redirects to HTTPS, Varnish is in the circuit |
 | Cache and purge on that chain | A page is a MISS, then a HIT; a hard purge with the right token answers 200 and the next request is a MISS again; a wrong token, no token, and a plain `PURGE` from the internet through CloudPanel all answer 405 |
+| `env list`, `get`, `set --apply` | The listing masks the five secrets (length only); a secret needs `--reveal`; a managed key is refused; changing one variable with `--apply` recreated only the service that uses it (the others kept their uptime) and the site kept answering; the value was restored the same way |
 | Before/after comparison with the host | Only the instance's own resources differ: vhost, user, port, CloudPanel site and certificate, containers, volumes, network, cron block, files |
 
 Findings (the first is fixed, with a regression test):
@@ -164,5 +165,5 @@ Findings (the first is fixed, with a regression test):
    public site served and the purge worked. The clean data also limits the anonymous `user/login` policy to the stock siteaccess: a real database
    already carries the project's.
 
-Not covered: the project's own migrations on a real database, the automatic rollback of a version that fails its probes (covered by
+Not covered: the hidden prompt of `env set` at a terminal (the stdin path was exercised), the project's own migrations on a real database, the automatic rollback of a version that fails its probes (covered by
 round 2 for another stack), and anything about the host's other sites beyond the before/after comparison.

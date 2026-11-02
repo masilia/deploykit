@@ -89,18 +89,30 @@ func (a *app) composeDeploy(ctx context.Context, p *project, targetID string, f 
 	c := &deploy.Compose{
 		Manifest: p.m, Target: t, Site: site, Repo: p.repo, Version: f.version, Install: f.install, TargetFile: t.Path, Release: release, Registry: registry,
 	}
+	// The target's own secrets file (secrets/<target>.env next to the manifest) is injected on every deploy; an explicit
+	// --env file is applied after it, so it wins.
+	fromSecrets, secretsPath, err := loadTargetSecrets(p, t.ID)
+	if err != nil {
+		return err
+	}
+	c.EnvFile = fromSecrets
 	if f.envFile != "" {
 		data, err := os.Open(f.envFile) //nolint:gosec // chosen by the operator
 		if err != nil {
 			return err
 		}
 		defer func() { _ = data.Close() }()
-		if c.EnvFile, err = envfile.ParseAssignments(data); err != nil {
+		explicit, err := envfile.ParseAssignments(data)
+		if err != nil {
 			return fmt.Errorf("--env %s: %w", f.envFile, err)
 		}
-		if len(c.EnvFile) == 0 {
+		if len(explicit) == 0 {
 			return fmt.Errorf("--env %s holds no KEY=VALUE line", f.envFile)
 		}
+		c.EnvFile = append(c.EnvFile, explicit...)
+	}
+	if secretsPath != "" {
+		_, _ = fmt.Fprintf(a.out, "%d variable(s) from %s\n", len(fromSecrets), secretsPath)
 	}
 	if f.binary != "" {
 		c.Binary, c.BinaryExplicit = f.binary, true

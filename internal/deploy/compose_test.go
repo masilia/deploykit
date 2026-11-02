@@ -118,7 +118,7 @@ func TestComposeUpdate(t *testing.T) {
 		"$ true",
 		"$ mkdir -p "+composeRoot+" "+composeRoot+"/.deploykit "+composeRoot+"/log",
 		"sync "+fx.repo+"/docker-compose.prod.yml -> "+composeRoot+"/docker-compose.prod.yml",
-		"sync "+fx.repo+"/docker/ -> "+composeRoot+"/docker/ --delete --exclude=deploy.env --exclude=targets/",
+		"sync "+fx.repo+"/docker/ -> "+composeRoot+"/docker/ --delete --exclude=deploy.env --exclude=secrets/ --exclude=targets/",
 		"sync "+fx.repo+"/deploykit.yaml -> "+composeRoot+"/deploykit.yaml",
 		"/.deploykit/target.env",
 		"$ uname -sm",

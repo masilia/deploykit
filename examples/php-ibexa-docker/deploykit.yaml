@@ -152,7 +152,7 @@ ingress:
 # --- Deployment tree sent to the server ------------------------------------------------------------------------------
 sync:
   files: [docker/docker-compose.prod.yml, docker/.env.example]
-  never: [deploy.env, targets/]
+  never: [deploy.env, secrets/, targets/]
 
 ssh:
   connect_timeout: 10s

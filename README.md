@@ -76,6 +76,7 @@ query that the terminal library sends at start-up, `TERM=dumb` skips it.
 | `bootstrap`, `deploy`, `rollback`, `status` | provision a site once; deploy; go back (`rollback` is pm2; for Compose deploy an older `--version`); show the live release or version |
 | `release` | build the images from a git tag and push them (`deploy` does it when they are missing) |
 | `run <command>` | php-fpm: run a named command of `runtime.commands` in the live release (clear a cache, reindex…); `deploy --also <command>` runs one after a deploy |
+| `env list\|get\|set` | compose: manage the server `.env` over SSH: list it with the secrets masked, read one variable (a secret needs `--reveal`), set one or several without a full deploy (`--apply` recreates the services) |
 | `healthcheck`, `fleet …` | health probes of a target; status, health, backups and ordered deploys across targets |
 | `server update\|install\|backup\|monitor\|restore-test\|renew-certs\|cron\|crons` | run on the server by `deploy` and by cron; not meant to be typed by hand |
 

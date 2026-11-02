@@ -192,7 +192,7 @@ ingress:
 # Compose runtime: the server receives the deploykit binary of the same version (no more rsync of scripts).
 sync:
   files: [docker-compose.prod.yml, docker-compose.cloudpanel.yaml, deployment/.env.example, docker/, docs/DEPLOYMENT.md, docs/CLIENT_INSTALLATION.md, docs/MAINTENANCE.md, docs/BACKUP_AND_RESTORE.md]
-  never: [deploy.env, targets/]                        # other clients' inventory never reaches a server
+  never: [deploy.env, secrets/, targets/]                        # other clients' inventory never reaches a server
 
 # --- Fleet ---------------------------------------------------------------------------------------------
 fleet:

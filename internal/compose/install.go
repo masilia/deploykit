@@ -52,6 +52,9 @@ func (in *Install) Run(ctx context.Context, r *runner.Runner) error {
 				for _, msg := range in.Stack.Cfg.Install.Reminders {
 					r.Notice("IMPORTANT: %s", msg)
 				}
+				if keys := sortedSecretKeys(in.Env.Secrets); len(keys) > 0 {
+					r.Notice("IMPORTANT: the server holds the only copy of these secrets: %s. Keep a copy elsewhere (a password manager); read one with `deploykit env get -t <target> KEY --reveal`.", strings.Join(keys, ", "))
+				}
 			}
 			return err
 		},

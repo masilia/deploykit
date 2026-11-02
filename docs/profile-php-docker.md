@@ -39,6 +39,10 @@ stack behind CloudPanel. Only Varnish publishes a port.
 - `ibexa:install` on an empty database, then `ibexa:reindex` into Solr, worked; the clean data gives the anonymous user no `user/login` on the project's siteaccess,
   so every Symfony route redirects to `/login` until a real database is loaded.
 
+## Variables
+The server `.env` is managed with `deploykit env` (list, get, set, `--apply`) and the git-ignored `secrets/<target>.env`: see [targets.md](targets.md). The project keeps no
+CloudPanel-side file for them, because the deployment root is outside the site's home on purpose.
+
 ## Limits
 - Run on a shared host as a throwaway instance, with `release`, `bootstrap`, `deploy --install`, an update, a rollback, HTTPS and the purge (docs/validation.md, round 5), but with a clean database: the project's own migrations were not run.
 - No `deploykit run` for the compose runtime: one-off commands (`ibexa:install`, `reindex`) go through `docker compose run --rm php …`.
