@@ -47,6 +47,7 @@ release:
   draft: true
   prerelease: auto
 
+# Only a snapshot uses this: a release takes its notes from CHANGELOG.md (--release-notes, see release.yml).
 changelog:
   sort: asc
   groups:

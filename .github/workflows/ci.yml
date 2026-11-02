@@ -19,6 +19,16 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
 
+  # Every version tag has a CHANGELOG.md entry (its release notes), and there is a section for what is not released yet.
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: grep -q '^## \[Unreleased\]' CHANGELOG.md
+      - run: for t in $(git tag -l 'v*'); do scripts/release-notes.sh "$t" > /dev/null; done
+
   lint:
     runs-on: ubuntu-latest
     steps:

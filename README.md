@@ -97,7 +97,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md); security reports go through [SECURITY.md
 
 ## Documentation
 
-[PLAN.md](PLAN.md) (design, status), [docs/adr/](docs/adr/) (decisions), [docs/cloudpanel-cli.md](docs/cloudpanel-cli.md)
+[CHANGELOG.md](CHANGELOG.md) (what changed in each version), [PLAN.md](PLAN.md) (design, status), [docs/adr/](docs/adr/) (decisions), [docs/cloudpanel-cli.md](docs/cloudpanel-cli.md)
 (what `clpctl` can and cannot do), [docs/targets.md](docs/targets.md) (target files),
 [docs/validation.md](docs/validation.md) (what was run on a real server, and the bugs it found).
 

@@ -1,6 +1,7 @@
 name: release
 
-# A version tag (v0.1.0) builds the binaries and creates a DRAFT GitHub release with them and a checksum file.
+# A version tag (v0.1.0) builds the binaries and creates a DRAFT GitHub release with them and a checksum file. The release notes
+# are the CHANGELOG.md entry of the tag; a tag without one does not release.
 on:
   push:
     tags: ["v*"]
@@ -21,9 +22,10 @@ jobs:
       # Never release what does not pass.
       - run: go vet ./...
       - run: go test -race ./...
+      - run: scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
