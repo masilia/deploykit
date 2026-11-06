@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/masilia/deploykit/internal/compose"
@@ -18,6 +19,7 @@ import (
 	"github.com/masilia/deploykit/internal/inventory"
 	"github.com/masilia/deploykit/internal/manifest"
 	"github.com/masilia/deploykit/internal/runner"
+	"github.com/masilia/deploykit/internal/tmpl"
 	"github.com/masilia/deploykit/internal/transport"
 )
 
@@ -134,6 +136,36 @@ func (c *Compose) Run(ctx context.Context, r *runner.Runner) error {
 	return r.Do(ctx, steps...)
 }
 
+// generatedFiles lists the files the server creates inside the deployment root, relative to it: with the standalone ingress, the TLS
+// configuration of the domain that the first install makes from a template. Losing it at the next deploy would take the HTTPS
+// down at the next reload of the proxy.
+func (c *Compose) generatedFiles() []string {
+	vars := c.Target.Vars()
+	vars["project"] = c.Manifest.Project
+	ax := c.Manifest.Ingress.Axis
+	if sel := c.Manifest.Ingress.Select; sel != "" {
+		key, err := tmpl.Render(sel, vars, false)
+		if err != nil {
+			return nil
+		}
+		if ax, err = c.Manifest.Ingress.Variant(key); err != nil {
+			return nil
+		}
+	}
+	if ax.Type != manifest.IngressStandalone {
+		return nil
+	}
+	var st manifest.Standalone
+	if err := ax.Decode(&st); err != nil || st.TLS.DomainConf.Target == "" {
+		return nil
+	}
+	target, err := tmpl.Render(st.TLS.DomainConf.Target, vars, false)
+	if err != nil {
+		return nil
+	}
+	return []string{path.Clean(target)}
+}
+
 func (c *Compose) verb() string {
 	if c.Install {
 		return "install"
@@ -150,6 +182,7 @@ func (c *Compose) uploadFiles(ctx context.Context, out io.Writer, cfg *manifest.
 	for _, o := range cfg.Overrides {
 		files = append(files, o.File)
 	}
+	generated := c.generatedFiles()
 	seen := map[string]bool{}
 	for _, f := range files {
 		if seen[f] {
@@ -170,6 +203,12 @@ func (c *Compose) uploadFiles(ctx context.Context, out io.Writer, cfg *manifest.
 			// filepath.Join drops the trailing slash, which rsync needs to mirror the contents instead of nesting the folder.
 			spec.Src += "/"
 			spec.Delete = true
+			// A folder is mirrored with --delete: what the server wrote inside it must not be deleted by the next deploy.
+			for _, g := range generated {
+				if rel, ok := strings.CutPrefix(g, f); ok && rel != "" {
+					spec.Excludes = append(slices.Clone(spec.Excludes), "/"+rel)
+				}
+			}
 		} else if _, err := c.Site.Run(ctx, transport.Spec{Argv: []string{"mkdir", "-p", path.Dir(spec.Dst)}}); err != nil {
 			return err
 		}

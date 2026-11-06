@@ -379,3 +379,46 @@ func TestComposeTakesTheKeysListedInFromTargetOnDeployFromTheTarget(t *testing.T
 		t.Errorf("the target's proxy port must reach the server .env:\n%s", env)
 	}
 }
+
+// A folder is mirrored with --delete. The standalone ingress makes the TLS configuration of the domain inside docker/ on the first
+// install: the next deploy must not delete it, or the HTTPS goes away at the next reload of the proxy.
+func TestComposeKeepsTheGeneratedTLSConfigurationAcrossDeploys(t *testing.T) {
+	syncLine := func(trace string) string {
+		for _, l := range strings.Split(trace, "\n") {
+			if strings.Contains(l, "-> "+composeRoot+"/docker/ ") {
+				return l
+			}
+		}
+		return ""
+	}
+
+	fx := newComposeFixture(t, nil) // the acme target uses TLS_MODE=certbot: the standalone ingress
+	if err := fx.run(t); err != nil {
+		t.Fatal(err)
+	}
+	line := syncLine(fx.site.Trace())
+	if !strings.Contains(line, "--delete") || !strings.Contains(line, "--exclude=/nginx/tls/app.acme.fr.conf") {
+		t.Errorf("the folder is mirrored, minus the file the server generated:\n%s", line)
+	}
+	for _, l := range strings.Split(fx.site.Trace(), "\n") {
+		if strings.Contains(l, "docker-compose.prod.yml ->") && strings.Contains(l, "nginx/tls") {
+			t.Errorf("only a folder that holds the file needs the exclusion: %s", l)
+		}
+	}
+
+	cp := newComposeFixture(t, nil)
+	if err := os.WriteFile(filepath.Join(cp.repo, "targets", "acme.env"), []byte("DEPLOY_HOST=srv\nDEPLOY_USER=deploy\nDEPLOY_PATH="+composeRoot+"\nDOMAIN=app.acme.fr\nTLS_MODE=cloudpanel\nSITE_USER=acme\nPROXY_PORT=8081\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target, err := inventory.Open(filepath.Join(cp.repo, "targets"), "acme", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp.c.Target = target
+	if err := cp.run(t); err != nil {
+		t.Fatal(err)
+	}
+	if line := syncLine(cp.site.Trace()); strings.Contains(line, "nginx/tls") {
+		t.Errorf("behind CloudPanel nothing is generated: %s", line)
+	}
+}

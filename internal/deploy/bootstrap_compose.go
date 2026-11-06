@@ -2,8 +2,11 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -16,10 +19,11 @@ import (
 	"github.com/masilia/deploykit/internal/transport"
 )
 
-// ComposeBootstrap prepares a server for a compose stack that sits behind CloudPanel: it picks the loopback port,
-// creates the CloudPanel reverse-proxy site that forwards the domain to it, asks for the certificate and creates the
-// deployment root for the deploy user. The stack itself is installed afterwards by `deploy --install`. Every step checks
-// its state first, so it can be run again.
+// ComposeBootstrap prepares a server for a compose stack. Behind CloudPanel it picks the loopback port, creates the
+// CloudPanel reverse-proxy site that forwards the domain to it, asks for the certificate and creates the deployment root for
+// the deploy user. With the standalone ingress there is no panel: it checks that Docker is there, that port 80 is free and
+// that the domain points at the server (what the certificate needs), and creates the deployment root. The stack itself is
+// installed afterwards by `deploy --install`. Every step checks its state first, so it can be run again.
 type ComposeBootstrap struct {
 	Manifest *manifest.Manifest
 	Target   *inventory.Target
@@ -41,8 +45,11 @@ func (b *ComposeBootstrap) Run(ctx context.Context, r *runner.Runner) error {
 			return err
 		}
 	}
+	if ax.Type == manifest.IngressStandalone {
+		return b.runStandalone(ctx, r, ax)
+	}
 	if ax.Type != manifest.IngressCloudPanel {
-		return fmt.Errorf("target %s uses the %s ingress: nothing to provision on CloudPanel (use `deploy --install`)", b.Target.ID, ax.Type)
+		return fmt.Errorf("target %s uses the %s ingress: nothing to provision (use `deploy --install`)", b.Target.ID, ax.Type)
 	}
 	var cfg manifest.CloudPanel
 	if err := ax.Decode(&cfg); err != nil {
@@ -176,4 +183,115 @@ func (b *ComposeBootstrap) Run(ctx context.Context, r *runner.Runner) error {
 			},
 		},
 	)
+}
+
+// runStandalone provisions a server that has no CloudPanel: the stack's own proxy will own ports 80 and 443 and ask Let's
+// Encrypt for the certificate, so what can be checked before the install is checked here.
+func (b *ComposeBootstrap) runStandalone(ctx context.Context, r *runner.Runner, ax manifest.Axis) error {
+	var cfg manifest.Standalone
+	if err := ax.Decode(&cfg); err != nil {
+		return err
+	}
+	domain, host, deployUser, root := b.Target.Get("domain"), b.Target.Get("host"), b.Target.Get("ssh_user"), strings.TrimRight(b.Target.Get("path"), "/")
+	switch {
+	case domain == "":
+		return fmt.Errorf("target %s: domain is required (the certificate is issued for it)", b.Target.ID)
+	case deployUser == "" || !cloudpanel.ValidSiteUser(deployUser):
+		return fmt.Errorf("target %s: ssh_user %q is not a valid user name", b.Target.ID, deployUser)
+	case !strings.HasPrefix(root, "/"):
+		return fmt.Errorf("target %s: path must be an absolute directory", b.Target.ID)
+	}
+	dns := b.DNS
+	if dns == nil {
+		dns = net.DefaultResolver
+	}
+	// Once the stack is installed its own proxy holds port 80: the checks of a first install do not apply any more.
+	installed := func(ctx context.Context) (bool, error) {
+		_, err := b.Root.Run(ctx, transport.Spec{Argv: []string{"test", "-f", root + "/.installed"}})
+		return err == nil, nil
+	}
+	steps := []runner.Step{{
+		Name: "docker",
+		Plan: "check that Docker and Compose are installed",
+		Run: func(ctx context.Context, out io.Writer) error {
+			res, err := b.Root.Run(ctx, transport.Spec{Argv: []string{"docker", "compose", "version", "--short"}})
+			if err != nil {
+				return fmt.Errorf("docker compose is not available on %s: install Docker Engine with the compose plugin first (%w)", host, err)
+			}
+			_, _ = fmt.Fprintf(out, "docker compose %s\n", strings.TrimSpace(res.Stdout))
+			return nil
+		},
+	}}
+	if cfg.Preflight.Port80Free {
+		steps = append(steps, runner.Step{
+			Name:  "port 80",
+			Plan:  "check that nothing listens on port 80: the stack's proxy needs it for the certificate",
+			Check: installed,
+			Run: func(ctx context.Context, out io.Writer) error {
+				res, err := b.Root.Run(ctx, transport.Spec{Script: "ss -ltnpH 'sport = :80' 2>/dev/null || true\n"})
+				if err != nil {
+					return err
+				}
+				if listeners := strings.TrimSpace(res.Stdout); listeners != "" {
+					return fmt.Errorf("port 80 is already in use on %s, so the stack's proxy could not start nor answer Let's Encrypt:\n%s", host, listeners)
+				}
+				_, _ = fmt.Fprintln(out, "port 80 is free")
+				return nil
+			},
+		})
+	}
+	if cfg.Preflight.DNSMatchesServer {
+		steps = append(steps, runner.Step{
+			Name:  "dns " + domain,
+			Plan:  "check that " + domain + " points at " + host + ": Let's Encrypt validates the domain by reaching this server",
+			Check: installed,
+			Run: func(ctx context.Context, out io.Writer) error {
+				want, err := dns.LookupHost(ctx, domain)
+				if err == nil && len(want) == 0 {
+					err = errors.New("no address")
+				}
+				if err != nil {
+					return fmt.Errorf("%s does not resolve yet: %w; create its A record, then run bootstrap again (a resolver that cached the missing name can take up to an hour: `dig @1.1.1.1 %s` asks a public one)", domain, err, domain)
+				}
+				have, err := dns.LookupHost(ctx, host)
+				if err != nil {
+					return fmt.Errorf("the server address %s does not resolve: %w", host, err)
+				}
+				for _, w := range want {
+					if slices.Contains(have, w) {
+						_, _ = fmt.Fprintf(out, "%s -> %s, the server\n", domain, w)
+						return nil
+					}
+				}
+				return fmt.Errorf("%s points at %s but the server is %s: fix the A record, the certificate cannot be issued otherwise", domain, strings.Join(want, ", "), strings.Join(have, ", "))
+			},
+		})
+	}
+	steps = append(steps,
+		runner.Step{
+			Name: "deployment root",
+			Plan: "create " + root + " owned by " + deployUser,
+			Check: func(ctx context.Context) (bool, error) {
+				_, err := b.Root.Run(ctx, transport.Spec{Argv: []string{"test", "-d", root}})
+				return err == nil, nil
+			},
+			Run: func(ctx context.Context, out io.Writer) error {
+				_, err := b.Root.Run(ctx, transport.Spec{
+					Script: "set -e\nmkdir -p \"$DK_ROOT\"\nchown \"$DK_USER:$DK_USER\" \"$DK_ROOT\"\nchmod 750 \"$DK_ROOT\"\n",
+					Env:    map[string]string{"DK_ROOT": root, "DK_USER": deployUser},
+				})
+				return err
+			},
+		},
+		runner.Step{
+			Name: "reminders",
+			Plan: "list what the provider's side must allow",
+			Run: func(ctx context.Context, out io.Writer) error {
+				r.Notice("ports 80 and 443 must be reachable from the Internet (a firewall of the provider's panel is not visible from the server); port 80 is how Let's Encrypt validates the domain")
+				r.Notice("next: set LETSENCRYPT_EMAIL, then deploykit deploy --install --version <X.Y.Z> -t %s", b.Target.ID)
+				return nil
+			},
+		},
+	)
+	return r.Do(ctx, steps...)
 }

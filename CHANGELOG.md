@@ -19,6 +19,7 @@ all of it.
   mounts from the host. It checks the paths a Dockerfile copies (`COPY conf/site.conf ...`) against the build context it guessed, and takes the other one (the Dockerfile's folder or the repository root) when the files are only there. A Dockerfile that copies the whole context (`COPY .`) says nothing about where its files are: the guess stands and `init` asks you to check it. It also says when the images were matched by name, and which image no Dockerfile matches.
 - The generated backup supports MariaDB and MySQL (`mariadb-dump` or `mysqldump`, the password taken from the container's own environment, a dump verified by its
   closing line). The restore test stays PostgreSQL-only and is not generated for them.
+- **`bootstrap` for the standalone ingress** (a server with no CloudPanel). It used to refuse; it now checks that Docker and Compose are installed, that nothing listens on port 80 and that the domain points at the server (`ingress.preflight`, which the manifest accepted and nothing read until now), then creates the deployment root for the deploy user. Once the stack is installed, the first-install checks are skipped, so it can be run again.
 - **`deploykit run` for the compose runtime**: runs a command of `runtime.app.commands` (`migrate`, `reindex`, `cache_clear`, …) on a target from your workstation, in a one-off container of the app service, or with `--exec` in the running one. Without a name it lists the commands. A command's secrets come from the server `.env` through the environment, never a command line; it refuses while an update, an install or a backup holds the operations lock; `--dry-run` starts nothing. The update hooks are not run.
 
 ### Changed
@@ -26,6 +27,7 @@ all of it.
   others can be rebuilt.
 
 ### Fixed
+- The TLS configuration that the standalone ingress generates inside the deployment root (`ingress.tls.domain_conf.target`) is no longer deleted by the next deploy: a folder is mirrored with `--delete`, and the file the server wrote there was not part of the project, so the next reload of the proxy would have dropped the HTTPS.
 - `init` no longer offers `Dockerfile.dockerignore`, the ignore file of a Dockerfile, as a Dockerfile to build.
 
 ## [0.5.1] - 2026-11-02
