@@ -303,3 +303,67 @@ func TestAPlainComposeProjectKeepsItsOldBehaviour(t *testing.T) {
 		t.Errorf("the old rule still sends docker/: %v", a.SyncDirs)
 	}
 }
+
+func TestCopySourcesAreWhatTheDockerfileTakesFromItsContext(t *testing.T) {
+	dir := files(t, map[string]string{"Dockerfile": "FROM alpine AS build\n" +
+		"COPY --chown=app:app conf/site.conf ./vendor/ /etc/app/\n" +
+		"COPY --from=build /out /out\n" +
+		"COPY . /everything\n" +
+		"COPY $SRC /var\n" +
+		"ADD https://example.com/x.tgz /tmp/\n" +
+		"COPY [\"a b\", \"/dst/\"]\n" +
+		"COPY multi \\\n   line.txt /etc/\n" +
+		"# COPY commented /out\n" +
+		"RUN echo COPY not-an-instruction /x\n"})
+	got := copySources(filepath.Join(dir, "Dockerfile"))
+	if strings.Join(got, ",") != "conf/site.conf,vendor/,multi,line.txt" {
+		t.Errorf("sources = %v: flags, stage copies, the whole context, variables, URLs and JSON-form copies are not paths to check", got)
+	}
+}
+
+func TestTheBuildContextFollowsWhatTheDockerfileCopies(t *testing.T) {
+	dir := files(t, map[string]string{
+		// copies a folder that is at the repository root: the Dockerfile's own folder holds nothing but the Dockerfile
+		"docker/solr/Dockerfile":    "FROM solr:8.11\nCOPY --chown=solr:solr conf/prod/solr/conf /opt/configset/conf\n",
+		"conf/prod/solr/conf/a.xml": "<a/>",
+		// copies files that sit next to it: its own folder is the context
+		"docker/varnish/Dockerfile":  "FROM debian\nCOPY default.vcl parameters.vcl /etc/varnish/\n",
+		"docker/varnish/default.vcl": "vcl 4.1;\n", "docker/varnish/parameters.vcl": "backend x {}\n",
+		// copies the whole context: nothing says where the files are, the guess stands (and is flagged to the user)
+		"docker/whole/Dockerfile": "FROM alpine\nCOPY . /app\n",
+		"docker/docker-compose.prod.yml": `services:
+  solr:   {image: "${REGISTRY}/acme-solr:${APP_VERSION}"}
+  varnish: {image: "${REGISTRY}/acme-varnish:${APP_VERSION}"}
+  whole:  {image: "${REGISTRY}/acme-whole:${APP_VERSION}"}
+`,
+	})
+	f := Detect(dir)
+	got := map[string]ImageRef{}
+	for _, im := range f.Images {
+		got[im.Name] = im
+	}
+	for name, want := range map[string]ImageRef{
+		"acme-solr":    {Name: "acme-solr", Dockerfile: "docker/solr/Dockerfile", Context: "."},
+		"acme-varnish": {Name: "acme-varnish", Dockerfile: "docker/varnish/Dockerfile", Context: "docker/varnish"},
+		"acme-whole":   {Name: "acme-whole", Dockerfile: "docker/whole/Dockerfile", Context: "docker/whole"},
+	} {
+		if got[name] != want {
+			t.Errorf("%s = %+v, want %+v", name, got[name], want)
+		}
+	}
+}
+
+func TestAStageKeepsItsFolderAsContextWhenThatIsWhereItsSourcesAre(t *testing.T) {
+	dir := files(t, map[string]string{
+		"docker/jobs/Dockerfile": "FROM alpine AS base\nFROM base AS worker\nCOPY src/ /app/\n",
+		"docker/jobs/src/run.sh": "#!/bin/sh\n",
+		"docker/docker-compose.prod.yml": `services:
+  worker: {image: "${REGISTRY}/acme-worker:${APP_VERSION}"}
+`,
+	})
+	f := Detect(dir)
+	want := ImageRef{Name: "acme-worker", Dockerfile: "docker/jobs/Dockerfile", Context: "docker/jobs", Target: "worker"}
+	if len(f.Images) != 1 || f.Images[0] != want {
+		t.Errorf("images = %+v, want %+v: the stage matched with the repository root, but its sources are in its folder", f.Images, want)
+	}
+}

@@ -45,7 +45,9 @@ registry matched to their Dockerfile (a folder named after the image, or a stage
 the roles (`edge` for Varnish, `search` for Solr, `proxy` for nginx), the app commands of an Ibexa project (`migrate`, `graphql`, `jwt_keypair`, `reindex`,
 `cache_clear`), the placeholders of the env template (`CHANGE_ME` secrets generated, the rest asked for in `prompts`), a MariaDB or MySQL backup (and no
 restore test, which supports PostgreSQL only), and a `sync.files` limited to the compose file and the env template. The matching is by name: check the
-context and target of each image in `artifact.images`, which `init` says. Run on a copy of the reference project, it produced a manifest that validates and
+context and target of each image in `artifact.images`, which `init` says. The context is the folder sent to `docker build`, and a Dockerfile can only copy files inside it: `init` reads the
+paths a Dockerfile copies and keeps the folder (or the repository root) that holds them. A Dockerfile that only does `COPY .` gives no clue, so write the paths it needs (`COPY conf/prod/solr/conf ...`)
+or correct the context by hand. Run on a copy of the reference project, it produced a manifest that validates and
 differs from the hand-written one by the build context of the Solr image.
 
 ## Variables
