@@ -37,6 +37,8 @@ type Update struct {
 	Notify func(ctx context.Context, text string)
 	// Crons are installed by the monitoring_cron step; empty means nothing to schedule.
 	Crons []CronEntry
+	// Standalone is the TLS configuration when the stack terminates TLS itself; the tls step needs it.
+	Standalone *manifest.Standalone
 
 	file   RemoteEnv
 	doc    *envfile.Doc
@@ -146,12 +148,24 @@ func (u *Update) steps(name string) ([]runner.Step, error) {
 			}
 			return nil
 		}}}, nil
+	case "tls":
+		return []runner.Step{{Name: "tls", Plan: "issue the missing certificates and write the missing server blocks (standalone ingress)", Optional: true, Run: u.tls}}, nil
 	case "proxy_reload":
 		return []runner.Step{{Name: "proxy reload", Plan: "reload the proxy", Optional: true, Run: u.proxyReload}}, nil
 	case "verify":
 		return []runner.Step{{Name: "verify", Plan: "wait for the health checks; roll back on failure", Run: u.verify}}, nil
 	}
 	return nil, fmt.Errorf("unknown update step %q", name)
+}
+
+// tls secures the names that are not yet: a domain added to the manifest gets its certificate at the next update. A failure is
+// reported but does not stop the update, so a DNS record that does not resolve yet cannot take a release back.
+func (u *Update) tls(ctx context.Context, out io.Writer) error {
+	if u.Standalone == nil {
+		_, _ = fmt.Fprintln(out, "TLS is terminated by CloudPanel: nothing to do")
+		return nil
+	}
+	return EnsureTLS(ctx, out, u.Stack, u.Standalone, u.doc)
 }
 
 func (u *Update) diskCheck(ctx context.Context, out io.Writer) error {

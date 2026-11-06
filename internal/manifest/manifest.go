@@ -404,6 +404,15 @@ func (m *Manifest) validateCompose() []error {
 			if err := ing.Decode(&st); err != nil {
 				add("ingress%s: %v", name, err)
 			}
+			seen := map[string]bool{st.TLS.DomainConf.Target: true}
+			for i, e := range st.TLS.ExtraDomains {
+				if err := e.Validate(); err != nil {
+					add("ingress%s: tls.extra_domains[%d]: %v", name, i, err)
+				} else if seen[e.Target] {
+					add("ingress%s: tls.extra_domains[%d]: target %q is already used", name, i, e.Target)
+				}
+				seen[e.Target] = true
+			}
 		}
 	}
 	return errs

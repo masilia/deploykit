@@ -44,7 +44,16 @@ The same stack runs on a bare server. `examples/php-ibexa-docker/deploykit.stand
 `docker-compose.standalone.yml`, takes the port away from Varnish and adds the service), answers Let's Encrypt's challenge from a shared volume and forwards to Varnish.
 `deploykit bootstrap` checks Docker, port 80 and the DNS and creates the deployment root; `deploy --install` makes the certificate with certbot, writes the TLS configuration of
 the domain from `docker/proxy/domain.conf.example` into `docker/proxy/conf.d/` (deploykit leaves that file alone when it syncs the folder) and reloads the proxy; a cron renews.
-Set `LETSENCRYPT_EMAIL`, point the domain's A record at the server first, and keep ports 80 and 443 open at the provider. After a database dump is loaded, re-index Solr before
+Set `LETSENCRYPT_EMAIL`, point the domain's A record at the server first, and keep ports 80 and 443 open at the provider.
+
+**A name that is not configured gets no answer.** Keep the two default servers of `docker/proxy/conf.d/00-http.conf`: port 80 answers the ACME challenge and closes the connection
+for anything else (`return 444`), port 443 refuses the TLS handshake (`ssl_reject_handshake on`). A catch-all that forwards to Varnish would serve the site, and any admin
+interface that Ibexa picks from the Host header, in clear text for every name that points at the server.
+
+**More names, one certificate and one server block each.** `ingress.tls.extra_domains` lists further names (the admin interface, typically). For each, `install` and the `tls` update
+step issue a certificate, write the file made from its own template (`docker/proxy/admin.conf.example`, where an IP allow-list or a second password goes) and reload the proxy; a name
+whose `.env` value is empty is skipped, and a name that already has both is left alone. `target` is a fixed path, kept out of the folder synchronisation like the main domain's file.
+The file is written once: to change it, edit it on the server and reload the proxy, or delete it and run `update`. `renew-certs` renews all the certificates of the volume. After a database dump is loaded, re-index Solr before
 the migrations (docs/validation.md, round 6).
 
 ## Starting from `deploykit init`

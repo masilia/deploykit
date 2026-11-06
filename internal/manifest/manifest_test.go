@@ -218,18 +218,23 @@ ingress: { type: standalone }
 		t.Fatalf("base manifest: %v", err)
 	}
 	for name, tc := range map[string]struct{ yaml, want string }{
-		"typo in the runtime":       {strings.Replace(base, "files:", "fils: [x], files:", 1), "fils"},
-		"no registry":               {strings.Replace(base, "registry: ghcr.io/org, ", "", 1), "registry"},
-		"no services":               {strings.Replace(base, ", services: [{ name: web, role: app }]", "", 1), "services"},
-		"app service not listed":    {strings.Replace(base, "files: [docker-compose.yml]", "files: [docker-compose.yml], app: { service: api }", 1), "not a declared service"},
-		"project directory escapes": {strings.Replace(base, "files: [docker-compose.yml]", "files: [docker-compose.yml], project_directory: ../elsewhere", 1), "project_directory"},
-		"unknown monitor check":     {base + "monitor: { checks: [bogus] }\n", "unknown monitor check"},
-		"backup without prefix":     {base + "data: { volumes: [a] }\nbackup: { dir: ./b }\n", "name_prefix"},
-		"bad monthly day":           {base + "data: {}\nbackup: { name_prefix: p, retention: { monthly_on_day: 31 } }\n", "monthly_on_day"},
-		"gpg without passphrase":    {base + "data: {}\nbackup: { name_prefix: p, encryption: { type: gpg } }\n", "passphrase_key"},
-		"secret of zero bytes":      {base + "env: { secrets: { A: { hex_bytes: 0 } } }\n", "hex_bytes"},
-		"target is a flag":          {strings.Replace(base, "dockerfile: Dockerfile }", "dockerfile: Dockerfile, target: \"--network=host\" }", 1), "not a Dockerfile stage name"},
-		"typo in standalone":        {strings.Replace(base, "ingress: { type: standalone }", "ingress: { type: standalone, tls: { typ: x } }", 1), "typ"},
+		"typo in the runtime":               {strings.Replace(base, "files:", "fils: [x], files:", 1), "fils"},
+		"no registry":                       {strings.Replace(base, "registry: ghcr.io/org, ", "", 1), "registry"},
+		"no services":                       {strings.Replace(base, ", services: [{ name: web, role: app }]", "", 1), "services"},
+		"app service not listed":            {strings.Replace(base, "files: [docker-compose.yml]", "files: [docker-compose.yml], app: { service: api }", 1), "not a declared service"},
+		"project directory escapes":         {strings.Replace(base, "files: [docker-compose.yml]", "files: [docker-compose.yml], project_directory: ../elsewhere", 1), "project_directory"},
+		"unknown monitor check":             {base + "monitor: { checks: [bogus] }\n", "unknown monitor check"},
+		"backup without prefix":             {base + "data: { volumes: [a] }\nbackup: { dir: ./b }\n", "name_prefix"},
+		"bad monthly day":                   {base + "data: {}\nbackup: { name_prefix: p, retention: { monthly_on_day: 31 } }\n", "monthly_on_day"},
+		"gpg without passphrase":            {base + "data: {}\nbackup: { name_prefix: p, encryption: { type: gpg } }\n", "passphrase_key"},
+		"secret of zero bytes":              {base + "env: { secrets: { A: { hex_bytes: 0 } } }\n", "hex_bytes"},
+		"target is a flag":                  {strings.Replace(base, "dockerfile: Dockerfile }", "dockerfile: Dockerfile, target: \"--network=host\" }", 1), "not a Dockerfile stage name"},
+		"typo in standalone":                {strings.Replace(base, "ingress: { type: standalone }", "ingress: { type: standalone, tls: { typ: x } }", 1), "typ"},
+		"extra domain without a template":   {strings.Replace(base, "ingress: { type: standalone }", "ingress: { type: standalone, tls: { extra_domains: [{ domain: a.example.com, target: t.conf }] } }", 1), "template is required"},
+		"extra domain without a name":       {strings.Replace(base, "ingress: { type: standalone }", "ingress: { type: standalone, tls: { extra_domains: [{ template: t.example, target: t.conf }] } }", 1), "domain is required"},
+		"extra domain target is a template": {strings.Replace(base, "ingress: { type: standalone }", "ingress: { type: standalone, tls: { extra_domains: [{ domain: a.example.com, template: t.example, target: 'c/{{ domain }}.conf' }] } }", 1), "fixed path"},
+		"two extra domains share a file":    {strings.Replace(base, "ingress: { type: standalone }", "ingress: { type: standalone, tls: { extra_domains: [{ domain: a.example.com, template: t.example, target: c.conf }, { domain: b.example.com, template: t.example, target: c.conf }] } }", 1), "already used"},
+		"extra domain reuses the main file": {strings.Replace(base, "ingress: { type: standalone }", "ingress: { type: standalone, tls: { domain_conf: { template: m.example, target: c.conf }, extra_domains: [{ domain: a.example.com, template: t.example, target: c.conf }] } }", 1), "already used"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Parse([]byte(tc.yaml))
@@ -237,6 +242,31 @@ ingress: { type: standalone }
 				t.Errorf("err = %v, want it to mention %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestStandaloneExtraDomainsDecode(t *testing.T) {
+	m, err := Parse([]byte(`
+version: 1
+project: demo
+artifact: { type: image, registry: ghcr.io/org, images: [{ name: web, dockerfile: Dockerfile }] }
+runtime: { type: compose, files: [docker-compose.yml], services: [{ name: web, role: app }] }
+ingress:
+  type: standalone
+  tls:
+    domain_conf: { template: docker/proxy/domain.conf.example, target: "docker/proxy/conf.d/{{ target.domain }}.conf" }
+    extra_domains:
+      - { domain: "{{ env.ADMIN_HOST | default: '' }}", template: docker/proxy/admin.conf.example, target: docker/proxy/conf.d/admin.conf }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st Standalone
+	if err := m.Ingress.Decode(&st); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.TLS.ExtraDomains) != 1 || st.TLS.ExtraDomains[0].Target != "docker/proxy/conf.d/admin.conf" || !strings.Contains(st.TLS.ExtraDomains[0].Domain, "ADMIN_HOST") {
+		t.Errorf("extra domains = %+v", st.TLS.ExtraDomains)
 	}
 }
 

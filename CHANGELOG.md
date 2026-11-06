@@ -11,6 +11,8 @@ all of it.
 ## [Unreleased]
 
 ### Added
+- **Several names behind the standalone ingress** (`ingress.tls.extra_domains`): each extra name, the admin interface for instance, gets its own Let's Encrypt certificate and its own nginx server block, written from its own template, so it can carry restrictions the public site does not. The name is a template over the server `.env` and is skipped while the value is empty; an invalid name is refused before anything runs; one name that fails does not stop the others. The files are kept out of the folder synchronisation. `renew-certs` already renews every certificate of the volume.
+- **A `tls` update step** (`update.steps`, between `up` and `proxy_reload`): issues the certificates and writes the server blocks that are still missing, so a name added to the manifest is secured by the next update. A failure is reported and does not stop the update or roll the release back.
 - **`deploykit init` for Docker stacks with their Dockerfiles in `docker/`** (the Ibexa profile and any compose project laid out like it): it finds the compose
   files in `docker/` and sets `project_directory`; matches the images a compose file takes from the registry to their Dockerfile, build context and, for a
   multi-stage Dockerfile, the stage to build (`target`); recognises the roles `edge` (Varnish) and `search` (Solr, Elasticsearch, OpenSearch, Meilisearch, Typesense);

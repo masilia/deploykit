@@ -137,8 +137,8 @@ func (c *Compose) Run(ctx context.Context, r *runner.Runner) error {
 }
 
 // generatedFiles lists the files the server creates inside the deployment root, relative to it: with the standalone ingress, the TLS
-// configuration of the domain that the first install makes from a template. Losing it at the next deploy would take the HTTPS
-// down at the next reload of the proxy.
+// configuration of the domain, and of each extra domain, that the install makes from a template. Losing one at the next deploy would
+// take its HTTPS down at the next reload of the proxy.
 func (c *Compose) generatedFiles() []string {
 	vars := c.Target.Vars()
 	vars["project"] = c.Manifest.Project
@@ -163,7 +163,13 @@ func (c *Compose) generatedFiles() []string {
 	if err != nil {
 		return nil
 	}
-	return []string{path.Clean(target)}
+	files := []string{path.Clean(target)}
+	for _, e := range st.TLS.ExtraDomains {
+		if e.Target != "" {
+			files = append(files, path.Clean(e.Target))
+		}
+	}
+	return files
 }
 
 func (c *Compose) verb() string {

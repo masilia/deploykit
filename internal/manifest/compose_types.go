@@ -453,7 +453,10 @@ type Standalone struct {
 			Template string `yaml:"template"`
 			Target   string `yaml:"target"`
 		} `yaml:"domain_conf"`
-		Renew struct {
+		// ExtraDomains are further names served by the same proxy, each with its own certificate and its own server block
+		// (the admin interface of an application, say, which can then carry restrictions the public site does not).
+		ExtraDomains []ExtraDomain `yaml:"extra_domains"`
+		Renew        struct {
 			Schedule string `yaml:"schedule"`
 		} `yaml:"renew"`
 	} `yaml:"tls"`
@@ -463,9 +466,34 @@ type Standalone struct {
 	} `yaml:"preflight"`
 }
 
+// ExtraDomain is one more name behind the standalone ingress. Domain is a template over the server .env (`{{ env.KEY }}`); an empty
+// result means the name is not configured and the domain is skipped. Template is the nginx server blocks with __DOMAIN__ in
+// place of the name, Target the file written from it. Target is a fixed path: the workstation must know it without the server .env,
+// to keep the file out of the directory synchronisation.
+type ExtraDomain struct {
+	Domain   string `yaml:"domain"`
+	Template string `yaml:"template"`
+	Target   string `yaml:"target"`
+}
+
+// Validate checks the fields an extra domain needs.
+func (e ExtraDomain) Validate() error {
+	switch {
+	case e.Domain == "":
+		return errorf("domain is required")
+	case e.Template == "":
+		return errorf("template is required")
+	case e.Target == "":
+		return errorf("target is required")
+	case strings.Contains(e.Target, "{{"):
+		return errorf("target %q must be a fixed path, not a template", e.Target)
+	}
+	return nil
+}
+
 // UpdateSteps and InstallSteps are the step names the manifest may list, in the order the tool knows them.
 var (
-	UpdateSteps  = []string{"lock", "disk_check", "backup", "pull", "migrate", "secrets", "up", "proxy_reload", "verify"}
+	UpdateSteps  = []string{"lock", "disk_check", "backup", "pull", "migrate", "secrets", "up", "tls", "proxy_reload", "verify"}
 	InstallSteps = []string{"secrets", "images_pull", "up_data", "jwt_keypair", "migrate", "seed_roles", "create_admin", "up_all", "tls", "crons", "monitoring_cron", "health"}
 )
 

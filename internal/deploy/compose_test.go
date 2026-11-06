@@ -382,6 +382,43 @@ func TestComposeTakesTheKeysListedInFromTargetOnDeployFromTheTarget(t *testing.T
 
 // A folder is mirrored with --delete. The standalone ingress makes the TLS configuration of the domain inside docker/ on the first
 // install: the next deploy must not delete it, or the HTTPS goes away at the next reload of the proxy.
+// Each extra domain has a server-generated file of its own, with a fixed name, and the mirror must keep it too.
+func TestComposeKeepsTheExtraDomainFilesAcrossDeploys(t *testing.T) {
+	fx := newComposeFixture(t, func(fx *composeFixture) {
+		path := filepath.Join(fx.repo, "deploykit.yaml")
+		data, err := os.ReadFile(path) //nolint:gosec // test file
+		if err != nil {
+			t.Fatal(err)
+		}
+		const anchor = "        renew: { schedule: \"15 3 * * *\" }"
+		if !strings.Contains(string(data), anchor) {
+			t.Fatal("the example manifest changed: update the anchor")
+		}
+		extra := "        extra_domains:\n          - { domain: \"{{ env.ADMIN_HOST | default: '' }}\", template: docker/nginx/tls/admin.conf.example, target: docker/nginx/tls/admin.conf }\n"
+		patched := strings.Replace(string(data), anchor, extra+anchor, 1)
+		if err := os.WriteFile(path, []byte(patched), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if fx.c.Manifest, err = manifest.Load(path); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err := fx.run(t); err != nil {
+		t.Fatal(err)
+	}
+	var line string
+	for _, l := range strings.Split(fx.site.Trace(), "\n") {
+		if strings.Contains(l, "-> "+composeRoot+"/docker/ ") {
+			line = l
+		}
+	}
+	for _, want := range []string{"--exclude=/nginx/tls/app.acme.fr.conf", "--exclude=/nginx/tls/admin.conf"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the mirror must keep %s:\n%s", want, line)
+		}
+	}
+}
+
 func TestComposeKeepsTheGeneratedTLSConfigurationAcrossDeploys(t *testing.T) {
 	syncLine := func(trace string) string {
 		for _, l := range strings.Split(trace, "\n") {

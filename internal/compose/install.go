@@ -10,7 +10,6 @@ import (
 	"github.com/masilia/deploykit/internal/envfile"
 	"github.com/masilia/deploykit/internal/manifest"
 	"github.com/masilia/deploykit/internal/runner"
-	"github.com/masilia/deploykit/internal/tmpl"
 	"github.com/masilia/deploykit/internal/transport"
 )
 
@@ -200,34 +199,7 @@ func (in *Install) tls(ctx context.Context, out io.Writer) error {
 		_, _ = fmt.Fprintf(out, "TLS is terminated by CloudPanel: point the site at 127.0.0.1:%s\n", in.CloudPanelPort)
 		return nil
 	}
-	st := in.Standalone
-	if len(st.TLS.Volumes) < 2 {
-		return fmt.Errorf("ingress.tls.volumes must list the letsencrypt and certbot-www volumes")
-	}
-	domain := in.doc.Get("DOMAIN", "")
-	vars := tmpl.Vars{"target": map[string]string{"domain": domain}, "env": envMap(in.doc)}
-	target, err := tmpl.Render(st.TLS.DomainConf.Target, vars, false)
-	if err != nil {
-		return err
-	}
-	project := in.Stack.Project
-	_, err = in.Stack.Script(ctx, out, `set -e
-if docker volume inspect "$DK_LE" >/dev/null 2>&1 && docker run --rm -v "$DK_LE:/etc/letsencrypt" `+helperImage+` test -d "/etc/letsencrypt/live/$DK_DOMAIN"; then
-  echo "certificate already present for $DK_DOMAIN"
-else
-  docker run --rm -v "$DK_WWW:/var/www/certbot" -v "$DK_LE:/etc/letsencrypt" certbot/certbot certonly --webroot -w /var/www/certbot -d "$DK_DOMAIN" --agree-tos -m "$DK_EMAIL" --non-interactive \
-    || { echo "certificate issuance failed (does the DNS point at this machine? is port 80 open?)" >&2; exit 1; }
-fi
-if [ ! -f "$DK_CONF" ]; then
-  sed "s|__DOMAIN__|$DK_DOMAIN|g" "$DK_TEMPLATE" > "$DK_CONF"
-  compose exec -T proxy nginx -s reload
-  echo "TLS enabled for $DK_DOMAIN"
-fi
-`, map[string]string{
-		"DK_LE": project + "_" + st.TLS.Volumes[0], "DK_WWW": project + "_" + st.TLS.Volumes[1],
-		"DK_DOMAIN": domain, "DK_EMAIL": in.doc.Get("LETSENCRYPT_EMAIL", ""), "DK_CONF": target, "DK_TEMPLATE": st.TLS.DomainConf.Template,
-	}, nil)
-	return err
+	return EnsureTLS(ctx, out, in.Stack, in.Standalone, in.doc)
 }
 
 // CronsFor lists the crons a deployment root needs, from the manifest. bin is the deploykit binary path on the server.

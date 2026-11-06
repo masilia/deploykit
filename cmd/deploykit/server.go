@@ -172,7 +172,7 @@ func (a *app) serverUpdate(load loader) *cobra.Command {
 				return err
 			}
 			u := &compose.Update{
-				Stack: s.stack, Env: envSpec, BaseURL: s.baseURL(env), PID: os.Getpid(), Notify: slack(env), Crons: crons, Now: a.now,
+				Stack: s.stack, Env: envSpec, BaseURL: s.baseURL(env), PID: os.Getpid(), Notify: slack(env), Crons: crons, Now: a.now, Standalone: s.standalone,
 			}
 			for _, i := range img.Images {
 				u.Images = append(u.Images, i.Name)

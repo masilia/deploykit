@@ -76,7 +76,7 @@ runtime:
       - { name: login, http: "{{ base_url }}/login", contains: "</html>", tries: 6, delay: 5s }
 
   update:
-    steps: [lock, disk_check, backup, pull, migrate, secrets, up, proxy_reload, verify]
+    steps: [lock, disk_check, backup, pull, migrate, secrets, up, tls, proxy_reload, verify]
     disk: { path: docker_root, min_free_mb: "{{ env.MIN_FREE_MB | default: 3000 }}" }
     on_failure:
       rollback: previous_version             # the schema is not undone
@@ -146,6 +146,14 @@ ingress:
     # The server makes this file from the template once the certificate exists; a folder is synced with --delete, and deploykit
     # leaves this one alone.
     domain_conf: { template: docker/proxy/domain.conf.example, target: "docker/proxy/conf.d/{{ target.domain }}.conf" }
+    # More names behind the same proxy, each with its own certificate and its own server block (so the admin can be restricted without
+    # touching the public site). The name comes from the server .env and the name is skipped while that value is empty. `target` is a
+    # fixed path: the workstation keeps the file out of the folder synchronisation without reading the server .env. The `tls` update
+    # step issues the certificate of a name added later; a failure there is reported and does not stop the update.
+    extra_domains:
+      - domain: "{{ env.ADMIN_DOMAIN | default: '' }}"
+        template: docker/proxy/admin.conf.example
+        target: docker/proxy/conf.d/admin.conf
     renew: { schedule: "15 3 * * *" }
   preflight: { port_80_free: true, dns_matches_server: true }   # checked by `bootstrap`
 
