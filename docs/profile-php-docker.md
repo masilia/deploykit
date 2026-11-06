@@ -39,6 +39,14 @@ stack behind CloudPanel. Only Varnish publishes a port.
 - `ibexa:install` on an empty database, then `ibexa:reindex` into Solr, worked; the clean data gives the anonymous user no `user/login` on the project's siteaccess,
   so every Symfony route redirects to `/login` until a real database is loaded.
 
+## Standalone: a server with no CloudPanel
+The same stack runs on a bare server. `examples/php-ibexa-docker/deploykit.standalone.yaml` adds an nginx container, `proxy`, that owns ports 80 and 443 (an override file,
+`docker-compose.standalone.yml`, takes the port away from Varnish and adds the service), answers Let's Encrypt's challenge from a shared volume and forwards to Varnish.
+`deploykit bootstrap` checks Docker, port 80 and the DNS and creates the deployment root; `deploy --install` makes the certificate with certbot, writes the TLS configuration of
+the domain from `docker/proxy/domain.conf.example` into `docker/proxy/conf.d/` (deploykit leaves that file alone when it syncs the folder) and reloads the proxy; a cron renews.
+Set `LETSENCRYPT_EMAIL`, point the domain's A record at the server first, and keep ports 80 and 443 open at the provider. After a database dump is loaded, re-index Solr before
+the migrations (docs/validation.md, round 6).
+
 ## Starting from `deploykit init`
 `deploykit init` recognises this layout and writes the manifest: the compose file in `docker/` (so `project_directory: .`), the images the file takes from the
 registry matched to their Dockerfile (a folder named after the image, or a stage of a multi-stage Dockerfile that nothing else builds on, as `--target`),
@@ -55,7 +63,7 @@ The server `.env` is managed with `deploykit env` (list, get, set, `--apply`) an
 CloudPanel-side file for them, because the deployment root is outside the site's home on purpose.
 
 ## Limits
-- Run on a shared host as a throwaway instance, with `release`, `bootstrap`, `deploy --install`, an update, a rollback, HTTPS and the purge (docs/validation.md, round 5), but with a clean database: the project's own migrations were not run.
+- Run behind CloudPanel on a shared host as a throwaway instance (docs/validation.md, round 5) and, in its standalone variant, on a fresh VPS with a real database, the uploaded files and the project's migrations (round 6). Behind CloudPanel it ran with a clean database only.
 - `deploykit run` runs the commands of `runtime.app.commands` (`migrate`, `graphql`, `cache_clear`, `reindex`, …) in a one-off container of the `php` service, or with `--exec` in the running one. It does not run the update hooks, and `ibexa:install` is not a declared command: it is a one-time act on an empty database, run by hand with `docker compose run --rm php …`.
 - `restore_test` supports PostgreSQL only: this profile has none; backups use `mariadb-dump` and are verified by its closing line.
 - Importing an existing database is out of scope.

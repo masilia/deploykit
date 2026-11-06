@@ -168,3 +168,33 @@ Findings (the first is fixed, with a regression test):
 
 Not covered: the hidden prompt of `env set` at a terminal (the stdin path was exercised), the project's own migrations on a real database, the automatic rollback of a version that fails its probes (covered by
 round 2 for another stack), and anything about the host's other sites beyond the before/after comparison.
+
+## Round 6: the standalone ingress on a fresh server, with a real database
+
+The Ibexa Docker stack on a **fresh Debian 13 VPS with no CloudPanel** (3.9 GB of RAM, no swap), reached through a domain of its own: the stack's
+nginx container owns ports 80 and 443, asks Let's Encrypt for the certificate and forwards to Varnish. The server was prepared from root (Docker from the
+vendor's repository with its key fingerprint checked, `gnupg`, `rsync`, a deploy user of the docker group); firewall and SSH were not touched.
+
+| Flow | Result |
+|---|---|
+| `bootstrap` (standalone) | Docker and Compose found, port 80 free, the domain resolves to the server, deployment root created for the deploy user |
+| `deploy --install` | 2 min 35 s: seven services healthy (nginx proxy, Varnish, nginx, PHP-FPM, MariaDB, Redis, Solr), Let's Encrypt certificate issued, the domain's TLS configuration written and the proxy reloaded, three crons (backup, monitor, certificate renewal) |
+| HTTPS from outside | Verified chain, HTTP redirects to HTTPS (301), Varnish in the circuit and serving from its cache |
+| Real database | A dump streamed into the database container (65 tables, 3 s), the uploaded files copied into the volume as the application's user (156 MB, 1 165 files, 114 s), the content roots of the real data set in the server `.env` |
+| The project's migrations on that data | See finding 3: the first run failed for a reason that was not the stack's, then two migrations were executed; Solr re-indexed (232 items), GraphQL schema generated |
+| `deploy` (update) of the same version | 1 min 01 s: new backup of the real data, the generated TLS file still there (same checksum), no container touched, HTTPS still answered |
+| `server renew-certs` | certbot reported the certificate not yet due, the proxy was reloaded, the site kept answering (an actual renewal was not exercised) |
+| `healthcheck` | Seven services and two page probes through the public URL |
+
+Findings:
+
+1. **`bootstrap` refused any target that was not behind CloudPanel**, and the preflight options of the standalone ingress (`port_80_free`, `dns_matches_server`) were parsed
+   and read by nothing. `bootstrap` now checks Docker, port 80 and the DNS, then creates the deployment root.
+2. **The generated TLS file would have been deleted by the next deploy.** A folder is synced with `--delete` and the file the install writes into it is not in the project:
+   the next reload of the proxy would have dropped the HTTPS. It is now excluded from the mirroring. Checked on the real server across an update.
+3. **After loading a dump, re-index Solr before running the migrations.** A migration that loads a content by its remote id goes through the search index, which is empty
+   until `reindex`: it failed with "found 0 matching contents" although the content was in the database. A migration that fails is recorded as failed and is not
+   retried by itself, and the next one then fails for lack of what the first creates: remove the record (`kaliop:migration:migration --delete <file>`), re-index, run again.
+4. A first install writes `replaces unknown` in the journal (no previous version is known): cosmetic.
+
+Not covered: an actual certificate renewal, a reboot of the server, the provider's own firewall (ports 80 and 443 were open), and a stack other than the Ibexa one.

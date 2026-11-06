@@ -14,8 +14,8 @@ scope**. `PLAN.md` is the design and holds the implementation status table; `doc
 `internal/envfile` and `internal/image` use them when `DEPLOYKIT_REFERENCE_DIR` points at a checkout (a directory holding `lib.sh`) and skip otherwise.
 
 The pm2 flow and the compose flows (status, backup, restore-test, monitor, `update` with rollback, `install` behind
-CloudPanel) were validated on a real shared CloudPanel host (`docs/validation.md`). The standalone certbot ingress has
-**not** run on a real host. Never run `update`, `install`, restarts or cron changes on a live host without an explicit
+CloudPanel) were validated on a real shared CloudPanel host (`docs/validation.md`). The standalone certbot ingress (the stack's own nginx on 80/443, Let's Encrypt) was validated on a fresh Debian VPS
+(`docs/validation.md`, round 6). Never run `update`, `install`, restarts or cron changes on a live host without an explicit
 go-ahead; test on a uniquely named throwaway instance (own path, own `COMPOSE_PROJECT`, own proxy port) and clean up
 after yourself, diffing against a snapshot taken first.
 
@@ -104,6 +104,5 @@ standalone); an ingress may use `select` + `variants` (the `TLS_MODE` key: varia
 
 ## Not built yet
 
-The Docker stack profile for PHP (`examples/php-ibexa-docker`: the compose runtime plus project Dockerfiles) with a real database (it ran as a throwaway
-instance with a clean one), the Bubble Tea TUI for deploys, and the
-standalone certbot ingress on a real host. See PLAN.md.
+The Bubble Tea TUI for deploys, and the standalone ingress with the stack of a project other than the Ibexa one
+(`examples/php-ibexa-docker` ran with its real database and migrations on a fresh VPS, round 6). See PLAN.md.

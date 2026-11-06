@@ -1,0 +1,161 @@
+# Example profile: the Ibexa Docker stack on a server that has NO CloudPanel. Same images and compose file as deploykit.yaml, plus an nginx
+# container (docker-compose.standalone.yml) that owns ports 80 and 443, answers Let's Encrypt and terminates TLS in front of Varnish.
+# deploykit makes the certificate on the first install (certbot, webroot) and renews it with a cron.
+#
+#   deploykit -f deploykit.standalone.yaml bootstrap -t <target>             # Docker, port 80, DNS; creates the deployment root
+#   deploykit -f deploykit.standalone.yaml deploy --install --version X.Y.Z -t <target>
+#
+# Validated on a fresh Debian server (docs/validation.md, round 6). The target needs TLS_MODE=certbot and a DOMAIN whose A record points at it.
+# PROPOSAL: the v1 schema is not frozen yet (see PLAN.md, ADR 0002).
+
+version: 1
+project: ibexa                  # compose project name: volumes are `ibexa_db_data`, `ibexa_solr_data`, ...
+
+inventory: targets/             # one target per file `targets/<id>.env`, no secret
+global_config: deploy.env       # editor-side, git-ignored, mode 600: REGISTRY, GHCR_USER, GHCR_TOKEN
+
+# --- Artifact: four images built from a git tag and pushed to a registry -----------------------------------------
+artifact:
+  type: image
+  registry: "{{ config.REGISTRY }}"          # explicit host/namespace, e.g. ghcr.io/my-org
+  registry_login:
+    host: ghcr.io
+    user: "{{ config.GHCR_USER }}"
+    token: "{{ config.GHCR_TOKEN }}"         # passed to `docker login --password-stdin`
+  source:
+    ref: "v{{ version }}"                    # built from `git archive`, never from the worktree
+    create_tag_if_missing: true
+  images:                                    # `target` picks the stage of a multi-stage Dockerfile
+    - { name: ibexa-php,     dockerfile: docker/Dockerfile,         context: ., target: php }
+    - { name: ibexa-web,     dockerfile: docker/Dockerfile,         context: ., target: web }
+    - { name: ibexa-varnish, dockerfile: docker/varnish/Dockerfile, context: docker/varnish }
+    - { name: ibexa-solr,    dockerfile: docker/solr/Dockerfile,    context: docker/solr/conf }   # the Ibexa Solr configset
+  ensure_release: true                       # deploy builds + pushes when the images are missing from the registry
+
+# --- Runtime: Docker Compose on the server -------------------------------------------------------------------------
+runtime:
+  type: compose
+  min_compose: "2.24"                        # `depends_on … restart: true`
+  project_directory: .                       # the .env is read from the deployment root, not from docker/
+  files: [docker/docker-compose.prod.yml, docker/docker-compose.standalone.yml]
+  version_state:
+    file: .env
+    current_key: APP_VERSION
+    previous_key: APP_VERSION_PREV
+  installed_marker: .installed
+  journal: versions.log
+  lock: .lock-ops
+
+  services:
+    - { name: proxy,   role: proxy }         # nginx on 80/443: TLS, the ACME challenge; reloaded after an update so it finds the new Varnish
+    - { name: varnish, role: edge }          # not published: the proxy reaches it on the compose network
+    - { name: web,     role: app }           # nginx in front of PHP-FPM (static files, FastCGI)
+    - { name: php,     role: app }
+    - { name: db,      role: db }
+    - { name: redis,   role: cache }
+    - { name: solr,    role: search }        # started with the data services, before the app commands
+
+  # app commands run in a one-off container of the `php` service (`compose run --rm php sh -c …`)
+  app:
+    service: php
+    commands:
+      jwt_keypair: php bin/console lexik:jwt:generate-keypair --skip-if-exists
+      migrate:     php -d memory_limit=1G bin/console kaliop:migration:migrate --no-interaction
+      graphql:     php bin/console ibexa:graphql:generate-schema
+      cache_clear: php bin/console cache:pool:clear cache.redis
+      reindex:     php -d memory_limit=2G bin/console ibexa:reindex --no-interaction
+    hooks:
+      after_migrate:                         # project specific; idempotent
+        - php bin/console ibexa:graphql:generate-schema
+        - php bin/console cache:pool:clear cache.redis
+
+  health:
+    wait: { timeout: 240s, interval: 5s }    # PHP-FPM warms the Symfony cache before it answers
+    probes:                                  # through Varnish, on the loopback port, with the site's Host header
+      - { name: site,  http: "{{ base_url }}/",      method: HEAD, tries: 12, delay: 5s }
+      - { name: login, http: "{{ base_url }}/login", contains: "</html>", tries: 6, delay: 5s }
+
+  update:
+    steps: [lock, disk_check, backup, pull, migrate, secrets, up, proxy_reload, verify]
+    disk: { path: docker_root, min_free_mb: "{{ env.MIN_FREE_MB | default: 3000 }}" }
+    on_failure:
+      rollback: previous_version             # the schema is not undone
+    cleanup: { keep_versions: [current, previous], prune_dangling: true }
+  install:
+    # No `migrate` and no `health`: an empty database holds no Ibexa schema yet. Load a dump, or run ibexa:install,
+    # then `deploykit update` runs the migrations and the probes.
+    steps: [secrets, images_pull, up_data, jwt_keypair, up_all, tls, crons]
+    reminders:
+      - "Load the database (restore a dump into the db service, or run php bin/console ibexa:install), then run `deploykit update` and `reindex`."
+      - "Copy BACKUP_PASSPHRASE to a password manager OFF this server: without it the backups are unreadable."
+
+# --- Server .env: schema ---------------------------------------------------------------------------------------------
+env:
+  file: .env
+  template: docker/.env.example              # copied on first install, mode 600
+  prompts: [DOMAIN, LETSENCRYPT_EMAIL]       # to set in the server .env (or in secrets/<target>.env) before the installation
+  secrets:                                   # generated when absent or CHANGE_ME*, never overwritten
+    APP_SECRET:                         { hex_bytes: 32 }
+    DB_PASSWORD:                        { hex_bytes: 16 }
+    DB_ROOT_PASSWORD:                   { hex_bytes: 16 }
+    HTTPCACHE_VARNISH_INVALIDATE_TOKEN: { hex_bytes: 32 }
+    BACKUP_PASSPHRASE:                  { hex_bytes: 16 }
+  from_target_on_deploy: [REGISTRY, PROXY_PORT]          # `deploy` rewrites it in the remote .env
+
+# --- Data protection (database tooling is out of scope; backups are in) --------------------------------------------
+data:
+  database:
+    type: mysql
+    service: db
+    # The password travels in the container environment, not in the command line.
+    dump: 'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-dump -u root --single-transaction --routines --default-character-set=utf8mb4 "$MARIADB_DATABASE"'
+    verify: "tail -n 5 | grep -q 'Dump completed'"   # mariadb-dump ends with that line: a truncated dump is refused
+  volumes: [public_var]                      # the uploaded files and image variations
+  include_files: [.env]
+backup:
+  name_prefix: ibexa-backup
+  dir: ./backups
+  encryption: { type: gpg, cipher: AES256, passphrase_key: BACKUP_PASSPHRASE }
+  verify: [sha256, decrypt_and_list]
+  retention: { daily_days: 7, monthly_days: 30, monthly_on_day: 1 }
+  min_free_mb: "{{ env.BACKUP_MIN_FREE_MB | default: 1000 }}"
+  schedule: "30 2 * * *"
+# No restore_test: the monthly restore proof supports PostgreSQL only.
+
+# --- Supervision: runs on the server, outside the application ----------------------------------------------------------
+monitor:
+  schedule: "*/5 * * * *"
+  state_file: log/monitor.state
+  fail_threshold: "{{ env.MONITOR_FAILS | default: 2 }}"
+  remind_hours: "{{ env.MONITOR_REMIND_HOURS | default: 6 }}"
+  skip_while_locked: true
+  checks:
+    - services
+    - { http: "{{ base_url }}/login", contains: "</html>" }
+    - { disk_free_mb_warn: "{{ env.MIN_FREE_MB | default: 3000 }}" }
+
+# --- Ingress: a CloudPanel reverse-proxy site in front of Varnish ----------------------------------------------------
+# CloudPanel terminates TLS and the domain; the stack only listens on the loopback port. The target needs SITE_USER and
+# PROXY_PORT (docs/targets.md).
+ingress:
+  type: standalone
+  tls:
+    type: certbot_webroot
+    email: "{{ env.LETSENCRYPT_EMAIL }}"
+    volumes: [letsencrypt, certbot-www]     # defined in docker-compose.standalone.yml
+    # The server makes this file from the template once the certificate exists; a folder is synced with --delete, and deploykit
+    # leaves this one alone.
+    domain_conf: { template: docker/proxy/domain.conf.example, target: "docker/proxy/conf.d/{{ target.domain }}.conf" }
+    renew: { schedule: "15 3 * * *" }
+  preflight: { port_80_free: true, dns_matches_server: true }   # checked by `bootstrap`
+
+# --- Deployment tree sent to the server ------------------------------------------------------------------------------
+sync:
+  files: [docker/docker-compose.prod.yml, docker/docker-compose.standalone.yml, docker/.env.example, docker/proxy/]
+  never: [deploy.env, secrets/, targets/]
+
+ssh:
+  connect_timeout: 10s
+  retries: 2
+  batch_mode_for_reads: true
+  provision_user: root                       # only to provision the CloudPanel site
