@@ -67,8 +67,8 @@ Every command takes `--dry-run`: read-only checks run, nothing is changed.
 
 **Choosing the target.** `-t/--target` names the target a command works on. With a single target in the inventory it is implied. With several and no `--target`,
 a command run at a terminal asks which one (a list of the targets with their domain and host; type to filter, Enter to choose, Ctrl-C to leave), says
-what to type next time, then goes on. `fleet status`, `fleet healthcheck`, `fleet backups` and `fleet upgrade`, which work on several targets, ask for any number of them (Space marks, Enter validates) when you give neither
-`--all` nor `--target`; `fleet deploy` never does, since a deploy of several servers is never implicit. A script, a pipe and CI never get a question: they fail with the list of targets, as before.
+what to type next time, then goes on. `fleet status`, `fleet healthcheck`, `fleet backups` and `fleet upgrade`, which work on several targets, ask which ones when you give neither
+`--all` nor `--target`: Enter takes the highlighted target, as for the other commands, and the last two lines of the list are "all N targets" and "several" (a second list where Space marks the targets and an empty validation is refused); `fleet deploy` never does, since a deploy of several servers is never implicit. A script, a pipe and CI never get a question: they fail with the list of targets, as before.
 
 `deploykit init` recognises a Next.js project (pm2) or a Docker Compose stack, proposes the project name, the services and
 the Dockerfiles it found, and lets you choose the sections you want (backups, restore test, monitoring, crons, quality

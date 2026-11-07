@@ -196,6 +196,12 @@ func (l *liner) askMulti(q question) error {
 				out = append(out, o.Value)
 			}
 		}
+		if q.validateList != nil {
+			if verr := q.validateList(out); verr != nil {
+				l.say("  %s", l.st.Fail("%v", verr))
+				continue
+			}
+		}
 		*q.list = out
 		return nil
 	}

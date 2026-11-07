@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -46,6 +47,7 @@ type app struct {
 	checkWait   time.Duration
 	updateDone  chan struct{} // closed when the daily look of this run is over; nil when there is none
 	cmdPath     string        // the command being run ("deploykit deploy"), for the questions that name it
+	askReader   *bufio.Reader // the one reader of the line prompts of this run: a second one would lose what the first has already read
 
 	out io.Writer
 	in  io.Reader // what the forms read; os.Stdin when nil

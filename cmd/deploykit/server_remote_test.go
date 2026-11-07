@@ -175,12 +175,16 @@ func fleetStatusHarness(t *testing.T, answers string) *composeHarness {
 }
 
 func TestFleetAsksWhichTargetsWhenNoneIsGiven(t *testing.T) {
+	// The first question is the one of every command: a number, or Enter for the first line. "2" is beta.
 	ch := fleetStatusHarness(t, "2\n")
 	if err := ch.run("fleet", "status"); err != nil {
 		t.Fatalf("%v\n%s", err, ch.out)
 	}
 	out := ch.out.String()
-	for _, want := range []string{"Which targets for 'deploykit fleet status'?", "Space marks a target", "1. acme", "2. beta", "(next time: deploykit fleet status --target beta)"} {
+	for _, want := range []string{
+		"Which targets for 'deploykit fleet status'?", "Enter takes the highlighted one", "1. acme", "2. beta",
+		"3. all 2 targets", "4. several: mark the ones you want", "(next time: deploykit fleet status --target beta)",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -191,25 +195,66 @@ func TestFleetAsksWhichTargetsWhenNoneIsGiven(t *testing.T) {
 		t.Errorf("only beta is reported:\n%s", table)
 	}
 
-	ch = fleetStatusHarness(t, "1,2\n")
-	if err := ch.run("fleet", "status"); err != nil {
-		t.Fatalf("%v\n%s", err, ch.out)
-	}
-	if o := ch.out.String(); !strings.Contains(o, "app.acme.fr") || !strings.Contains(o, "app.beta.fr") || !strings.Contains(o, "--target acme --target beta") {
-		t.Errorf("both targets are reported and the hint repeats them:\n%s", o)
+	for name, c := range map[string]struct {
+		answers, hint string
+		acme, beta    bool
+	}{
+		"Enter takes the first": {"\n", "(next time: deploykit fleet status --target acme)", true, false},
+		"all of them":           {"3\n", "(next time: deploykit fleet status --all)", true, true},
+		"several, all marked":   {"4\n1,2\n", "(next time: deploykit fleet status --all)", true, true},
+		"several, one":          {"4\n2\n", "(next time: deploykit fleet status --target beta)", false, true},
+	} {
+		ch := fleetStatusHarness(t, c.answers)
+		if err := ch.run("fleet", "status"); err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, ch.out)
+		}
+		out := ch.out.String()
+		_, report, found := strings.Cut(out, c.hint)
+		if !found {
+			t.Errorf("%s: the reminder %q is missing:\n%s", name, c.hint, out)
+			continue
+		}
+		if got := strings.Contains(report, "app.acme.fr"); got != c.acme {
+			t.Errorf("%s: acme reported = %v, want %v:\n%s", name, got, c.acme, report)
+		}
+		if got := strings.Contains(report, "app.beta.fr"); got != c.beta {
+			t.Errorf("%s: beta reported = %v, want %v:\n%s", name, got, c.beta, report)
+		}
 	}
 }
 
-func TestFleetKeepsItsErrorWhenNothingIsChosenOrNobodyCanAnswer(t *testing.T) {
-	for name, setup := range map[string]func(*composeHarness){
-		"no one at a terminal": func(ch *composeHarness) { ch.app.interactive = func() bool { return false } },
-		"none marked":          func(*composeHarness) {},
-	} {
-		ch := fleetStatusHarness(t, "-\n")
-		setup(ch)
-		err := ch.run("fleet", "status")
-		if err == nil || !strings.Contains(err.Error(), "no target selected: use --all or --target ID") {
-			t.Errorf("%s: want the usual error, got %v", name, err)
+// "several" opens a second question where marking nothing is refused, and asked again: it is not a failure reported afterwards.
+func TestFleetSeveralRefusesAnEmptyChoice(t *testing.T) {
+	ch := fleetStatusHarness(t, "4\n-\n\n1\n")
+	if err := ch.run("fleet", "status"); err != nil {
+		t.Fatalf("%v\n%s", err, ch.out)
+	}
+	out := ch.out.String()
+	if !strings.Contains(out, "Several targets for 'deploykit fleet status'") || strings.Count(out, "choose at least one") != 2 {
+		t.Errorf("the second question refuses each empty answer:\n%s", out)
+	}
+	if _, report, _ := strings.Cut(out, "(next time: deploykit fleet status --target acme)"); !strings.Contains(report, "app.acme.fr") {
+		t.Errorf("then the target that was marked is reported:\n%s", out)
+	}
+}
+
+func TestFleetKeepsItsErrorWhenNobodyCanAnswerAndStopsWhenTheUserLeaves(t *testing.T) {
+	ch := fleetStatusHarness(t, "2\n")
+	ch.app.interactive = func() bool { return false } // a script, a pipe, CI
+	if err := ch.run("fleet", "status"); err == nil || !strings.Contains(err.Error(), "no target selected: use --all or --target ID") {
+		t.Errorf("without a terminal the usual error stays, got %v", err)
+	}
+	if len(ch.out.String()) != 0 && strings.Contains(ch.out.String(), "Which targets") {
+		t.Error("nothing is asked")
+	}
+
+	ch = fleetStatusHarness(t, "4\n-\n") // several, nothing marked, and the input ends
+	if err := ch.run("fleet", "status"); err == nil || !strings.Contains(err.Error(), "no target chosen") {
+		t.Errorf("leaving the question stops the command, got %v", err)
+	}
+	for _, id := range []string{"acme", "beta"} {
+		if len(ch.sites[id].Calls()) != 0 {
+			t.Errorf("%s: no server is contacted when nothing was chosen", id)
 		}
 	}
 }

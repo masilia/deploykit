@@ -50,6 +50,9 @@ func huhField(q question) huh.Field {
 		return huh.NewSelect[string]().Title(q.title).Description(q.desc).Value(q.str).Options(huhOptions(q.options(), nil)...)
 	case qMulti:
 		ms := huh.NewMultiSelect[string]().Title(q.title).Description(q.desc).Value(q.list)
+		if q.validateList != nil {
+			ms = ms.Validate(q.validateList)
+		}
 		selected := func(v string) bool { return contains(*q.list, v) }
 		if q.watch != nil {
 			return ms.OptionsFunc(func() []huh.Option[string] { return huhOptions(q.options(), selected) }, q.watch)
@@ -124,9 +127,9 @@ func Pick(o FormOptions, title, desc string, labels, values []string) (string, e
 	return picked, nil
 }
 
-// PickMany asks the user to choose any number of the options (none is the user's right: the result is then empty and the caller says
-// what that means). Nothing is chosen at the start, so that a choice is always deliberate. The values come back in the order of the
-// options. Leaving the form is ErrAborted.
+// PickMany asks the user to mark one or more of the options and returns their values, in the order of the options. Nothing is marked at
+// the start, so that a choice is always deliberate, and validating with nothing marked is refused (the form says so and stays open; line
+// prompts ask again): a caller that wants "the one under the cursor" asks Pick first. Leaving the form is ErrAborted.
 func PickMany(o FormOptions, title, desc string, labels, values []string) ([]string, error) {
 	if len(labels) == 0 || len(labels) != len(values) {
 		return nil, fmt.Errorf("nothing to pick from (%d labels, %d values)", len(labels), len(values))
@@ -136,7 +139,13 @@ func PickMany(o FormOptions, title, desc string, labels, values []string) ([]str
 		cs[i] = choice{labels[i], values[i]}
 	}
 	picked := []string{}
-	q := question{kind: qMulti, title: title, desc: desc, list: &picked, options: func() []choice { return cs }}
+	q := question{kind: qMulti, title: title, desc: desc, list: &picked, options: func() []choice { return cs },
+		validateList: func(v []string) error {
+			if len(v) == 0 {
+				return errors.New("choose at least one")
+			}
+			return nil
+		}}
 	var err error
 	if o.Accessible {
 		err = newLiner(o).askMulti(q)

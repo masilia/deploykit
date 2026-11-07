@@ -56,7 +56,12 @@ func (a *app) askOptions() scaffold.FormOptions {
 	}
 	accessible := a.plain || os.Getenv("TERM") == "dumb" || a.accessible || !hasScreenSize()
 	if accessible {
-		in = bufio.NewReader(in) // shared by every prompt of the command, so none of them loses buffered answers
+		// One reader for every question of the run: a reader of its own per question would swallow, with its buffer, the answers that
+		// the next question is waiting for.
+		if a.askReader == nil {
+			a.askReader = bufio.NewReader(in)
+		}
+		in = a.askReader
 	}
 	return scaffold.FormOptions{In: in, Out: a.out, Accessible: accessible}
 }
@@ -87,28 +92,52 @@ func (a *app) pickTarget(dir string, ids []string, global *envfile.Doc) (id stri
 	return chosen, true, nil
 }
 
-// pickTargets asks which targets a command that works on several of them is for. Nothing is chosen at the start; choosing none is an
-// empty answer, which the caller reports like any other missing selection.
+// The two options after the targets in the list of pickTargets. Target ids match ^[A-Za-z0-9._-]+$, so these cannot be one.
+const (
+	pickAllTargets     = "\x00all"
+	pickSeveralTargets = "\x00several"
+)
+
+// pickTargets asks which targets a command that works on several of them is for. The first question is the one of pickTarget: Enter
+// takes the target that is highlighted, which is what most people mean; two more lines at the end of the list say "all of them" and "several",
+// and "several" opens a list where Space marks the targets and an empty validation is refused.
 func (a *app) pickTargets(dir string, ids []string, global *envfile.Doc) (chosen []string, ok bool, err error) {
 	if !a.canPick() || len(ids) < 2 {
 		return nil, false, nil
 	}
 	cmdPath := a.commandPath()
-	chosen, err = scaffold.PickMany(a.askOptions(), fmt.Sprintf("Which targets for '%s'?", cmdPath),
-		"Space marks a target, Enter validates. Pass --all or --target <id> to skip this question.", targetLabels(dir, ids, global), ids)
+	labels := append(targetLabels(dir, ids, global),
+		fmt.Sprintf("all %d targets", len(ids)),
+		"several: mark the ones you want, on the next screen")
+	values := append(append([]string{}, ids...), pickAllTargets, pickSeveralTargets)
+	first, err := scaffold.Pick(a.askOptions(), fmt.Sprintf("Which targets for '%s'?", cmdPath),
+		"Enter takes the highlighted one. Pass --all or --target <id> to skip this question.", labels, values)
+	if err == nil {
+		switch first {
+		case pickAllTargets:
+			chosen = ids
+		case pickSeveralTargets:
+			chosen, err = scaffold.PickMany(a.askOptions(), fmt.Sprintf("Several targets for '%s'", cmdPath),
+				"Space (or x) marks a target, Enter validates.", targetLabels(dir, ids, global), ids)
+		default:
+			chosen = []string{first}
+		}
+	}
 	if err != nil {
 		if errors.Is(err, scaffold.ErrAborted) {
 			return nil, true, errors.New("no target chosen")
 		}
 		return nil, true, err
 	}
-	if len(chosen) > 0 {
-		hint := cmdPath
+	hint := cmdPath
+	if len(chosen) == len(ids) {
+		hint += " --all"
+	} else {
 		for _, id := range chosen {
 			hint += " --target " + id
 		}
-		_, _ = fmt.Fprintln(a.out, a.styles().Muted.Render("targets "+strings.Join(chosen, ", ")+"  (next time: "+hint+")"))
 	}
+	_, _ = fmt.Fprintln(a.out, a.styles().Muted.Render("targets "+strings.Join(chosen, ", ")+"  (next time: "+hint+")"))
 	return chosen, true, nil
 }
 

@@ -59,7 +59,7 @@ func pickManyWith(t *testing.T, input string, labels, values []string) ([]string
 
 func TestPickManyReturnsTheMarkedValuesInTheOrderOfTheOptions(t *testing.T) {
 	labels, values := []string{"alpha", "beta", "gamma"}, []string{"a", "b", "g"}
-	for input, want := range map[string]string{"1\n": "a", "3,1\n": "a,g", "1, 2 ,3\n": "a,b,g", "-\n": "", "\n": ""} {
+	for input, want := range map[string]string{"1\n": "a", "3,1\n": "a,g", "1, 2 ,3\n": "a,b,g"} {
 		got, out, err := pickManyWith(t, input, labels, values)
 		if err != nil || strings.Join(got, ",") != want {
 			t.Errorf("input %q: got %v, %v; want %q", input, got, err, want)
@@ -79,5 +79,21 @@ func TestPickManyWhenTheInputEndsIsAnAbortAndNeedsOptions(t *testing.T) {
 	}
 	if _, _, err := pickManyWith(t, "1\n", nil, nil); err == nil {
 		t.Error("nothing to choose from is an error")
+	}
+}
+
+// Validating with nothing marked is refused and asked again, never answered with an empty list: the caller would report it as a failure
+// after the fact, which looks like a question that does not work.
+func TestPickManyRefusesAnEmptyValidation(t *testing.T) {
+	labels, values := []string{"alpha", "beta"}, []string{"a", "b"}
+	got, out, err := pickManyWith(t, "\n-\n  \n2\n", labels, values)
+	if err != nil || strings.Join(got, ",") != "b" {
+		t.Fatalf("got %v, %v; want b", got, err)
+	}
+	if n := strings.Count(out, "choose at least one"); n != 3 {
+		t.Errorf("each empty answer is refused with the same message, got %d times:\n%s", n, out)
+	}
+	if _, _, err := pickManyWith(t, "\n-\n", labels, values); !errors.Is(err, ErrAborted) {
+		t.Errorf("when the input ends on refused answers it is an abort, got %v", err)
 	}
 }

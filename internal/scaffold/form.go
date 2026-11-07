@@ -323,6 +323,8 @@ type question struct {
 
 	options  func() []choice
 	validate func(string) error
+	// validateList refuses a list of marked options (a multiple choice), with the message to show: the form stays open on it.
+	validateList func([]string) error
 	// suggest is what an empty answer means (a placeholder, or the [default] of a line prompt).
 	suggest func() string
 	// watch is what the suggestion or the options depend on, so the full-screen form refreshes them.

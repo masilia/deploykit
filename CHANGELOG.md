@@ -10,6 +10,9 @@ all of it.
 
 ## [Unreleased]
 
+### Fixed
+- **The question of `fleet status`, `fleet healthcheck`, `fleet backups` and `fleet upgrade` looked broken.** It was a list to mark with Space, and pressing Enter at once, the gesture of every other picker, ended with "no target selected". It now starts like the others: Enter takes the highlighted target, and the last two lines of the list are "all N targets" and "several", which opens the list to mark, where validating with nothing marked is refused on the screen (and asked again with line prompts) instead of failing afterwards. In line-prompt mode (`--plain`, a dumb terminal) a second question no longer finds the input already swallowed by the first.
+
 ## [0.9.0] - 2026-11-07
 
 ### Added
