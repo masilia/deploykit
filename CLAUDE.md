@@ -67,6 +67,8 @@ standalone); an ingress may use `select` + `variants` (the `TLS_MODE` key: varia
   shared links, `prepare`/`after_switch` named commands, extension check, health on the site's backend 127.0.0.1:8080). `build.image` runs the
   build commands in a throwaway container (`releasedir.RunBuildStepInContainer`). php-fpm bootstrap (`bootstrap_php.go`) derives a CloudPanel vhost
   template from a base one (`cloudpanel.PHPTemplate`, golden test on `testdata/symfony7.tpl`). ADR 0009.
+- The binary of a server: `deploy` uploads this machine's deploykit as one of its steps (`Compose.uploadBinary`: platform check, SHA-256 compared, synced, SHA-256 read back,
+  version asked); `Compose.UpgradeBinary` is that step alone, behind `deploy --binary-only` and `fleet upgrade` (`cmd_upgrade.go`). A dry run of it reads and sends nothing.
 - `internal/selfupdate` + `cmd/deploykit/cmd_selfupdate.go`: `self-update` and the daily notice. The package knows GitHub's releases API, semver, the checked
   install (https only, `checksums.txt`, only `deploykit` at the top of the archive, the new binary must report the release's version) and the cache file;
   the command decides when. The notice runs in a goroutine from the root `PersistentPreRun` and is told from `PersistentPostRun`; it must never delay a command

@@ -10,6 +10,12 @@ all of it.
 
 ## [Unreleased]
 
+### Added
+- **`deploykit deploy --binary-only` and `deploykit fleet upgrade`** put this machine's deploykit (or the build `--server-binary` names) on the server of one target, or of several in rollout order, and do nothing else: no files, no `.env`, no update, no restart. Until now the binary of a server only changed with a full deploy (backup, pull, migrations, restart). It checks that the binary can run on that platform, that the deployment root exists (a server where `deploy --install` never ran is refused), that the upload arrived intact (SHA-256), and prints the version the server now runs; an identical binary is not sent again. Cron and `deploykit server ...` use that binary, so they run the new one from their next call. `--dry-run` connects, reads and says what it would send. `fleet upgrade` asks which targets at a terminal, like `fleet status`, and takes `--continue-on-error`.
+
+### Fixed
+- The documentation said the question of `fleet` also applied to `fleet deploy`. It does not, and never did: a deploy of several servers is never implicit (`--target` or `--all` is required) and never a question.
+
 ## [0.8.0] - 2026-11-07
 
 ### Added

@@ -167,6 +167,9 @@ func (a *app) deployCmd() *cobra.Command {
 			case manifest.RuntimeCompose:
 				return a.composeDeploy(ctx, p, target, cf)
 			case manifest.RuntimePM2, manifest.RuntimePHPFPM:
+				if cf.binaryOnly {
+					return fmt.Errorf("--binary-only is for compose stacks: a %s site keeps no deploykit on its server", p.m.Runtime.Type)
+				}
 			default:
 				return fmt.Errorf("runtime %s is not implemented yet (pm2, php-fpm and compose are)", p.m.Runtime.Type)
 			}
@@ -187,6 +190,7 @@ func (a *app) deployCmd() *cobra.Command {
 	f.StringVar(&cf.envFile, "env", "", "compose: KEY=VALUE file injected into the server .env (secrets travel on stdin)")
 	f.BoolVar(&cf.gates, "gates", false, "compose: run the quality gates before building a missing release")
 	f.StringVar(&cf.binary, "server-binary", "", "compose: deploykit binary to upload (needed when this machine is not the server's platform)")
+	f.BoolVar(&cf.binaryOnly, "binary-only", false, "compose: only put this deploykit on the server: no files, no .env, no update, no restart")
 	return cmd
 }
 

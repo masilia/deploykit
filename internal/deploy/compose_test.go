@@ -459,3 +459,145 @@ func TestComposeKeepsTheGeneratedTLSConfigurationAcrossDeploys(t *testing.T) {
 		t.Errorf("behind CloudPanel nothing is generated: %s", line)
 	}
 }
+
+// ---- UpgradeBinary: the binary of the server, and nothing else ---------------------------------------------------------------
+
+// upgrade runs UpgradeBinary and returns the notices it gave.
+func (fx *composeFixture) upgrade(t *testing.T, dryRun bool) ([]string, error) {
+	t.Helper()
+	var notices []string
+	rep := noteReporter(func(e runner.Event) {
+		if e.Kind == runner.Notice || e.Kind == runner.Output {
+			notices = append(notices, e.Line)
+		}
+	})
+	err := fx.c.UpgradeBinary(t.Context(), &runner.Runner{Reporter: rep, DryRun: dryRun})
+	return notices, err
+}
+
+func TestUpgradeBinaryUploadsTheBinaryAndNothingElse(t *testing.T) {
+	fx := newComposeFixture(t, nil) // the server has no binary yet, then the one that is uploaded
+	fx.site.OnFunc(func(s transport.Spec) bool {
+		return len(s.Argv) == 2 && s.Argv[0] == composeRoot+"/.deploykit/deploykit" && s.Argv[1] == "version"
+	}, transport.Result{Stdout: "deploykit 0.8.0 (commit abc, built today)\n"})
+	notices, err := fx.upgrade(t, false)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, fx.site.Trace())
+	}
+	trace := fx.site.Trace()
+	if !strings.Contains(trace, "sync "+fx.bin+" -> "+composeRoot+"/.deploykit/deploykit") {
+		t.Errorf("the binary must be uploaded:\n%s", trace)
+	}
+	for _, banned := range []string{"server update", "server install", "/.env", "docker", "targets/", "deploykit.yaml", "mkdir", "crontab"} {
+		if strings.Contains(trace, banned) {
+			t.Errorf("only the binary goes: %q appears in\n%s", banned, trace)
+		}
+	}
+	if got := strings.Join(notices, "\n"); !strings.Contains(got, "binary uploaded (sha256 ") || !strings.Contains(got, "deploykit 0.8.0 (commit abc, built today)") {
+		t.Errorf("the upload is reported with the version the server now runs: %v", notices)
+	}
+	if !strings.Contains(trace, "test -d "+composeRoot+"/.deploykit") {
+		t.Errorf("the deployment root is checked first:\n%s", trace)
+	}
+}
+
+func TestUpgradeBinaryLeavesAServerThatIsUpToDateAlone(t *testing.T) {
+	fx := newComposeFixture(t, func(fx *composeFixture) {
+		s, _ := fileSHA(fx.bin)
+		fx.site.OnFunc(func(sp transport.Spec) bool { return strings.Contains(sp.Script, "sha256sum") }, transport.Result{Stdout: s + "\n"})
+	})
+	notices, err := fx.upgrade(t, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(fx.site.Trace(), "sync ") || !strings.Contains(strings.Join(notices, "\n"), "already has this exact binary") {
+		t.Errorf("an identical binary is not uploaded again (notices %v):\n%s", notices, fx.site.Trace())
+	}
+}
+
+func TestUpgradeBinaryNeedsADeploymentRoot(t *testing.T) {
+	fx := newComposeFixture(t, func(fx *composeFixture) {
+		fx.site.Fail("test -d "+composeRoot+"/.deploykit", 1, "")
+	})
+	_, err := fx.upgrade(t, false)
+	if err == nil || !strings.Contains(err.Error(), "has no deployment root at /opt/app") || !strings.Contains(err.Error(), "deploykit deploy --install") {
+		t.Fatalf("a server that was never installed says what to do, got %v", err)
+	}
+	if strings.Contains(fx.site.Trace(), "sync ") {
+		t.Error("nothing is dropped in a folder that deploy never made")
+	}
+
+	// An ssh that fails is not an answer about the folder.
+	fx = newComposeFixture(t, func(fx *composeFixture) {
+		fx.site.Fail("test -d "+composeRoot+"/.deploykit", 255, "ssh: connect to host srv: Connection timed out")
+	})
+	if _, err := fx.upgrade(t, false); err == nil || strings.Contains(err.Error(), "no deployment root") {
+		t.Errorf("an unreachable server is not reported as a missing folder, got %v", err)
+	}
+}
+
+func TestUpgradeBinaryRefusesAPlatformTheServerCannotRun(t *testing.T) {
+	fx := newComposeFixture(t, nil)
+	fx.c.LocalOS, fx.c.LocalArch = "darwin", "arm64"
+	_, err := fx.upgrade(t, false)
+	if err == nil || !strings.Contains(err.Error(), "darwin/arm64") || !strings.Contains(err.Error(), "--server-binary") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(fx.site.Trace(), "sync ") {
+		t.Error("a binary the server cannot run is not uploaded")
+	}
+	fx = newComposeFixture(t, nil)
+	fx.c.LocalOS, fx.c.LocalArch, fx.c.BinaryExplicit = "darwin", "arm64", true
+	if _, err := fx.upgrade(t, false); err != nil {
+		t.Errorf("--server-binary skips the platform check: %v", err)
+	}
+}
+
+func TestUpgradeBinaryDetectsACorruptUpload(t *testing.T) {
+	fx := newComposeFixture(t, func(fx *composeFixture) {
+		fx.site.OnFunc(func(sp transport.Spec) bool { return strings.Contains(sp.Script, "sha256sum") }, transport.Result{Stdout: "deadbeef\n"})
+	})
+	if _, err := fx.upgrade(t, false); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestUpgradeBinaryOnlyForComposeStacks(t *testing.T) {
+	fx := newComposeFixture(t, nil)
+	fx.c.Manifest.Runtime.Type = manifest.RuntimePM2
+	if _, err := fx.upgrade(t, false); err == nil || !strings.Contains(err.Error(), "only compose stacks") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(fx.site.Calls()) != 0 {
+		t.Error("no server is contacted")
+	}
+}
+
+func TestUpgradeBinaryDryRunChangesNothingAndSaysWhatItWouldDo(t *testing.T) {
+	fx := newComposeFixture(t, func(fx *composeFixture) {
+		fx.site.OnFunc(func(s transport.Spec) bool {
+			return len(s.Argv) == 2 && s.Argv[0] == composeRoot+"/.deploykit/deploykit" && s.Argv[1] == "version"
+		}, transport.Result{Stdout: "deploykit 0.5.1 (commit old)\n"})
+	})
+	notices, err := fx.upgrade(t, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(notices, "\n"); !strings.Contains(got, "would upload "+fx.bin) || !strings.Contains(got, "it has deploykit 0.5.1") {
+		t.Errorf("the dry run says what it would upload and what the server has: %v", notices)
+	}
+	for _, banned := range []string{"sync ", "chmod"} {
+		if strings.Contains(fx.site.Trace(), banned) {
+			t.Errorf("a dry run changes nothing (%q):\n%s", banned, fx.site.Trace())
+		}
+	}
+
+	// Already in place: it says so.
+	fx = newComposeFixture(t, func(fx *composeFixture) {
+		s, _ := fileSHA(fx.bin)
+		fx.site.OnFunc(func(sp transport.Spec) bool { return strings.Contains(sp.Script, "sha256sum") }, transport.Result{Stdout: s + "\n"})
+	})
+	if notices, err := fx.upgrade(t, true); err != nil || !strings.Contains(strings.Join(notices, "\n"), "already has this exact binary") {
+		t.Errorf("a dry run on an up-to-date server says so (%v): %v", err, notices)
+	}
+}

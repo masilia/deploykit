@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -247,33 +248,15 @@ func fileSHA(p string) (string, error) {
 }
 
 func (c *Compose) uploadBinary(ctx context.Context, out io.Writer) error {
-	if !c.BinaryExplicit {
-		res, err := c.Site.Run(ctx, transport.Spec{Argv: []string{"uname", "-sm"}})
-		if err != nil {
-			return err
-		}
-		goos, goarch, err := ServerPlatform(res.Stdout)
-		if err != nil {
-			return err
-		}
-		lo, la := c.LocalOS, c.LocalArch
-		if lo == "" {
-			lo = runtime.GOOS
-		}
-		if la == "" {
-			la = runtime.GOARCH
-		}
-		if lo != goos || la != goarch {
-			return fmt.Errorf("this deploykit is %s/%s but the server is %s/%s: pass --server-binary with a %s/%s build", lo, la, goos, goarch, goos, goarch)
-		}
+	if err := c.checkBinaryPlatform(ctx); err != nil {
+		return err
 	}
 	local, err := fileSHA(c.Binary)
 	if err != nil {
 		return err
 	}
 	dst := c.remote(".deploykit/deploykit")
-	res, _ := c.Site.Run(ctx, transport.Spec{Script: `sha256sum "$DK_BIN" 2>/dev/null | cut -d' ' -f1` + "\n", Env: map[string]string{"DK_BIN": dst}})
-	if strings.TrimSpace(res.Stdout) == local {
+	if c.serverSHA(ctx, dst) == local {
 		_, _ = fmt.Fprintln(out, "the server already has this exact binary: "+c.serverVersion(ctx, dst))
 		return nil
 	}
@@ -283,7 +266,7 @@ func (c *Compose) uploadBinary(ctx context.Context, out io.Writer) error {
 	if _, err := c.Site.Run(ctx, transport.Spec{Argv: []string{"chmod", "755", dst}}); err != nil {
 		return err
 	}
-	res, err = c.Site.Run(ctx, transport.Spec{Script: `sha256sum "$DK_BIN" | cut -d' ' -f1` + "\n", Env: map[string]string{"DK_BIN": dst}})
+	res, err := c.Site.Run(ctx, transport.Spec{Script: `sha256sum "$DK_BIN" | cut -d' ' -f1` + "\n", Env: map[string]string{"DK_BIN": dst}})
 	if err != nil {
 		return err
 	}
@@ -292,6 +275,93 @@ func (c *Compose) uploadBinary(ctx context.Context, out io.Writer) error {
 	}
 	_, _ = fmt.Fprintf(out, "binary uploaded (sha256 %s…): %s\n", local[:12], c.serverVersion(ctx, dst))
 	return nil
+}
+
+// checkBinaryPlatform refuses a binary that cannot run on the server: this machine's, unless --server-binary names another build.
+func (c *Compose) checkBinaryPlatform(ctx context.Context) error {
+	if c.BinaryExplicit {
+		return nil
+	}
+	res, err := c.Site.Run(ctx, transport.Spec{Argv: []string{"uname", "-sm"}})
+	if err != nil {
+		return err
+	}
+	goos, goarch, err := ServerPlatform(res.Stdout)
+	if err != nil {
+		return err
+	}
+	lo, la := c.LocalOS, c.LocalArch
+	if lo == "" {
+		lo = runtime.GOOS
+	}
+	if la == "" {
+		la = runtime.GOARCH
+	}
+	if lo != goos || la != goarch {
+		return fmt.Errorf("this deploykit is %s/%s but the server is %s/%s: pass --server-binary with a %s/%s build", lo, la, goos, goarch, goos, goarch)
+	}
+	return nil
+}
+
+// UpgradeBinary puts the deploykit binary of this machine on the server of the target, and does nothing else: no files, no .env, no
+// update of the stack, no restart. Cron and `deploykit server ...` use that binary, so they run the new one from the next call on.
+// The deployment root must exist already (deploy --install makes it). In a dry run it only says whether an upload is needed.
+func (c *Compose) UpgradeBinary(ctx context.Context, r *runner.Runner) error {
+	root := c.root()
+	if root == "" || !strings.HasPrefix(root, "/") {
+		return fmt.Errorf("target %s: path must be an absolute directory", c.Target.ID)
+	}
+	if c.Manifest.Runtime.Type != manifest.RuntimeCompose {
+		return fmt.Errorf("only compose stacks keep a deploykit on the server; this manifest uses runtime %s", c.Manifest.Runtime.Type)
+	}
+	if err := r.Do(ctx, runner.Step{Name: "connect", Plan: "check the SSH access", Run: func(ctx context.Context, _ io.Writer) error {
+		_, err := c.Site.Run(ctx, transport.Spec{Argv: []string{"true"}})
+		return err
+	}}); err != nil {
+		return err
+	}
+	dst := c.remote(".deploykit/deploykit")
+	if r.DryRun {
+		if err := c.requireDeploymentRoot(ctx); err != nil {
+			return err
+		}
+		if err := c.checkBinaryPlatform(ctx); err != nil {
+			return err
+		}
+		local, err := fileSHA(c.Binary)
+		if err != nil {
+			return err
+		}
+		if c.serverSHA(ctx, dst) == local {
+			r.Notice("the server already has this exact binary: %s", c.serverVersion(ctx, dst))
+		} else {
+			r.Notice("would upload %s (sha256 %s…) to %s; it has %s", c.Binary, local[:12], dst, c.serverVersion(ctx, dst))
+		}
+		return nil
+	}
+	return r.Do(ctx, runner.Step{Name: "server binary", Plan: "upload the deploykit binary of this version", Run: func(ctx context.Context, out io.Writer) error {
+		if err := c.requireDeploymentRoot(ctx); err != nil {
+			return err
+		}
+		return c.uploadBinary(ctx, out)
+	}})
+}
+
+// requireDeploymentRoot checks that deploy already made the deployment root: a binary dropped in a folder that nothing else uses would
+// be a half installation. An ssh that fails (exit 255) is not an answer about the folder.
+func (c *Compose) requireDeploymentRoot(ctx context.Context) error {
+	_, err := c.Site.Run(ctx, transport.Spec{Argv: []string{"test", "-d", c.remote(".deploykit")}})
+	var exit *transport.ExitError
+	if errors.As(err, &exit) && exit.Code != 255 {
+		return fmt.Errorf("target %s has no deployment root at %s yet: run 'deploykit deploy --install --version X.Y.Z -t %s' first", c.Target.ID, c.root(), c.Target.ID)
+	}
+	return err
+}
+
+// serverSHA is the SHA-256 of the binary on the server, empty when there is none.
+func (c *Compose) serverSHA(ctx context.Context, dst string) string {
+	res, _ := c.Site.Run(ctx, transport.Spec{Script: `sha256sum "$DK_BIN" 2>/dev/null | cut -d' ' -f1` + "\n", Env: map[string]string{"DK_BIN": dst}})
+	return strings.TrimSpace(res.Stdout)
 }
 
 // serverVersion asks the uploaded binary for its own version, so the deploy log says which build runs on the server.

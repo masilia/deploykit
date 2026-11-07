@@ -21,7 +21,7 @@ import (
 
 type composeFlags struct {
 	version, rollback, envFile, binary string
-	install, gates                     bool
+	install, gates, binaryOnly         bool
 }
 
 // registryOf renders the manifest's registry template with the target and global configuration.
@@ -58,6 +58,12 @@ func (a *app) composeDeploy(ctx context.Context, p *project, targetID string, f 
 	t, err := p.target(targetID)
 	if err != nil {
 		return err
+	}
+	if f.binaryOnly {
+		if with := binaryOnlyConflicts(f); with != "" {
+			return fmt.Errorf("--binary-only puts the binary on the server and nothing else: it does not go with %s", with)
+		}
+		return a.upgradeServerBinary(ctx, p, t, f.binary)
 	}
 	if f.rollback != "" {
 		if f.version != "" && f.version != f.rollback {
@@ -412,7 +418,7 @@ func (a *app) fleetCmd() *cobra.Command {
 	deployCmd.Flags().BoolVar(&ff.node.SkipInstall, "skip-install", false, "pm2: skip the dependency install")
 	deployCmd.Flags().BoolVar(&ff.node.SkipChecks, "skip-checks", false, "pm2: skip lint and type checks")
 	deployCmd.Flags().BoolVar(&ff.continueErr, "continue-on-error", false, "do not stop at the first failing target")
-	cmd.AddCommand(status, health, backups, deployCmd)
+	cmd.AddCommand(status, health, backups, deployCmd, a.fleetUpgradeCmd(&ff))
 	return cmd
 }
 

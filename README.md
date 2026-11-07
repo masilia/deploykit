@@ -38,7 +38,8 @@ for the commands cron and the shell completion run. `DEPLOYKIT_NO_UPDATE_CHECK=1
 
 You need `git`, `ssh` and `rsync` on the workstation, plus `node` for Next.js builds or `docker` for image releases.
 `deploykit doctor` checks the workstation and the server. For Docker Compose stacks the server also needs `docker`
-(compose 2.24+), `gpg` and `cron`; deploykit uploads its own binary there.
+(compose 2.24+), `gpg` and `cron`; deploykit uploads its own binary there, with every `deploy`. To change only that binary (after `self-update`, say), use
+`deploykit deploy --binary-only -t <target>`, or `deploykit fleet upgrade --all`: it checks that the binary can run there, sends it, reads back its version and leaves the stack alone.
 
 ## Quick start
 
@@ -66,8 +67,8 @@ Every command takes `--dry-run`: read-only checks run, nothing is changed.
 
 **Choosing the target.** `-t/--target` names the target a command works on. With a single target in the inventory it is implied. With several and no `--target`,
 a command run at a terminal asks which one (a list of the targets with their domain and host; type to filter, Enter to choose, Ctrl-C to leave), says
-what to type next time, then goes on. `fleet …`, which works on several targets, asks for any number of them (Space marks, Enter validates) when you give neither
-`--all` nor `--target`. A script, a pipe and CI never get a question: they fail with the list of targets, as before.
+what to type next time, then goes on. `fleet status`, `fleet healthcheck`, `fleet backups` and `fleet upgrade`, which work on several targets, ask for any number of them (Space marks, Enter validates) when you give neither
+`--all` nor `--target`; `fleet deploy` never does, since a deploy of several servers is never implicit. A script, a pipe and CI never get a question: they fail with the list of targets, as before.
 
 `deploykit init` recognises a Next.js project (pm2) or a Docker Compose stack, proposes the project name, the services and
 the Dockerfiles it found, and lets you choose the sections you want (backups, restore test, monitoring, crons, quality
@@ -90,6 +91,7 @@ query that the terminal library sends at start-up, `TERM=dumb` skips it.
 |---|---|
 | `init`, `target add` | create `deploykit.yaml` and the first target; add another server |
 | `validate`, `doctor` | check the manifest and the targets; check the tools needed here and on the server |
+| `deploy --binary-only`, `fleet upgrade` | compose: put this deploykit on the server of one target, or of several, and nothing else: no files, no `.env`, no update, no restart (`deploy` sends it too, together with everything else) |
 | `bootstrap`, `deploy`, `rollback`, `status` | provision a site once; deploy; go back (`rollback` is pm2; for Compose deploy an older `--version`); show the live release or version |
 | `release` | build the images from a git tag and push them (`deploy` does it when they are missing) |
 | `run [command]` | run a named command of the manifest: php-fpm, in the live release (`runtime.commands`; `deploy --also <command>` runs one after a deploy); compose, in a one-off container of the app service (`runtime.app.commands`, `--exec` for the running one). Without a name, compose lists the commands |

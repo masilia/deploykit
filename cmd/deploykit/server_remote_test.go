@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -222,4 +224,178 @@ func TestFleetAsksNothingWhenTheSelectionIsGiven(t *testing.T) {
 			t.Errorf("%v: the selection is given, nothing is asked:\n%s", args, ch.out)
 		}
 	}
+}
+
+// ---- upgrading the binary of the servers ----------------------------------------------------------------------------------
+
+// upgradeHarness is remoteHarness plus a binary to send and servers that behave: no binary at first, then the one that was sent.
+func upgradeHarness(t *testing.T, answers string) (*composeHarness, string) {
+	t.Helper()
+	ch := remoteHarness(t, answers)
+	bin := filepath.Join(t.TempDir(), "deploykit-linux-amd64")
+	if err := os.WriteFile(bin, []byte("a deploykit binary"), 0o700); err != nil { //nolint:gosec // test double
+		t.Fatal(err)
+	}
+	sum := sha256Hex(t, bin)
+	for _, id := range []string{"acme", "beta"} {
+		f := ch.site(id)
+		calls := 0
+		f.OnFunc(func(s transport.Spec) bool { // the first look at the server finds no binary
+			if !strings.Contains(s.Script, "sha256sum") {
+				return false
+			}
+			calls++
+			return calls == 1
+		}, transport.Result{})
+		f.OnFunc(func(s transport.Spec) bool { return strings.Contains(s.Script, "sha256sum") }, transport.Result{Stdout: sum + "\n"})
+	}
+	return ch, bin
+}
+
+func synced(f *transport.Fake) bool {
+	return strings.Contains(f.Trace(), "/.deploykit/deploykit") && strings.Contains(f.Trace(), "sync ")
+}
+
+func TestDeployBinaryOnlyPutsTheBinaryAndNothingElse(t *testing.T) {
+	ch, bin := upgradeHarness(t, "")
+	if err := ch.run("deploy", "--binary-only", "--target", "acme", "--server-binary", bin); err != nil {
+		t.Fatalf("%v\n%s", err, ch.out)
+	}
+	trace := ch.sites["acme"].Trace()
+	if !strings.Contains(trace, "sync "+bin+" -> /opt/app/.deploykit/deploykit") {
+		t.Errorf("the binary is uploaded:\n%s", trace)
+	}
+	for _, banned := range []string{"server update", "server install", "/.env", "docker", "rsync", "deploykit.yaml", "mkdir"} {
+		if strings.Contains(trace, banned) {
+			t.Errorf("only the binary goes: %q in\n%s", banned, trace)
+		}
+	}
+	if !strings.Contains(ch.out.String(), "server binary") {
+		t.Errorf("the step is reported:\n%s", ch.out)
+	}
+}
+
+func TestDeployBinaryOnlyDoesNotGoWithTheOptionsOfADeploy(t *testing.T) {
+	for _, extra := range [][]string{{"--version", "1.0.0"}, {"--install"}, {"--env", "x.env"}, {"--rollback", "1.0.0"}, {"--gates"}} {
+		ch, bin := upgradeHarness(t, "")
+		args := append([]string{"deploy", "--binary-only", "--target", "acme", "--server-binary", bin}, extra...)
+		err := ch.run(args...)
+		if err == nil || !strings.Contains(err.Error(), "--binary-only puts the binary on the server and nothing else") || !strings.Contains(err.Error(), extra[0]) {
+			t.Errorf("%v: want a clear refusal naming %s, got %v", extra, extra[0], err)
+		}
+		if len(ch.sites["acme"].Calls()) != 0 {
+			t.Errorf("%v: no server is contacted", extra)
+		}
+	}
+	h := newHarness(newProjectDir(t, cliManifest)) // pm2: no deploykit on the server
+	if err := h.run("deploy", "--binary-only", "-t", "demo"); err == nil || !strings.Contains(err.Error(), "--binary-only is for compose stacks") {
+		t.Errorf("a pm2 site keeps no deploykit on its server, got %v", err)
+	}
+}
+
+func TestDeployBinaryOnlyDryRunSendsNothing(t *testing.T) {
+	ch, bin := upgradeHarness(t, "")
+	if err := ch.run("--dry-run", "deploy", "--binary-only", "--target", "acme", "--server-binary", bin); err != nil {
+		t.Fatalf("%v\n%s", err, ch.out)
+	}
+	if synced(ch.sites["acme"]) {
+		t.Errorf("a dry run uploads nothing:\n%s", ch.sites["acme"].Trace())
+	}
+	if !strings.Contains(ch.out.String(), "would upload "+bin) {
+		t.Errorf("the dry run says what it would do:\n%s", ch.out)
+	}
+}
+
+func TestFleetUpgradeIsInRolloutOrder(t *testing.T) {
+	ch, bin := upgradeHarness(t, "")
+	if err := ch.run("fleet", "upgrade", "--all", "--server-binary", bin); err != nil {
+		t.Fatalf("%v\n%s", err, ch.out)
+	}
+	if !synced(ch.sites["acme"]) || !synced(ch.sites["beta"]) {
+		t.Fatalf("both servers get the binary:\n%s", ch.out)
+	}
+	out := ch.out.String()
+	// beta has ROLLOUT_ORDER=10 and acme 20: beta goes first.
+	if b, a := strings.Index(out, "== upgrading the binary of beta"), strings.Index(out, "== upgrading the binary of acme"); b < 0 || a < 0 || b > a {
+		t.Errorf("targets are done in rollout order (beta, then acme):\n%s", out)
+	}
+}
+
+func TestFleetUpgradeAsksWhichTargetsAtATerminal(t *testing.T) {
+	ch, bin := upgradeHarness(t, "2\n")
+	if err := ch.run("fleet", "upgrade", "--server-binary", bin); err != nil {
+		t.Fatalf("%v\n%s", err, ch.out)
+	}
+	if !strings.Contains(ch.out.String(), "Which targets for 'deploykit fleet upgrade'?") {
+		t.Errorf("the question names the command:\n%s", ch.out)
+	}
+	if synced(ch.sites["acme"]) || !synced(ch.sites["beta"]) {
+		t.Errorf("only the marked target (beta) is upgraded:\nacme %s\nbeta %s", ch.sites["acme"].Trace(), ch.sites["beta"].Trace())
+	}
+
+	ch, bin = upgradeHarness(t, "1\n")
+	ch.app.interactive = func() bool { return false } // a script
+	if err := ch.run("fleet", "upgrade", "--server-binary", bin); err == nil || !strings.Contains(err.Error(), "no target selected") {
+		t.Errorf("a script must name its targets, got %v", err)
+	}
+	if synced(ch.sites["acme"]) || synced(ch.sites["beta"]) {
+		t.Error("nothing is sent when no target is selected")
+	}
+}
+
+func TestFleetUpgradeStopsAtTheFirstFailureUnlessToldNotTo(t *testing.T) {
+	ch, bin := upgradeHarness(t, "")
+	ch.sites["beta"].Fail("test -d", 1, "") // beta is first in rollout order and was never installed
+	err := ch.run("fleet", "upgrade", "--all", "--server-binary", bin)
+	if err == nil || !strings.Contains(err.Error(), "upgrade failed on beta") {
+		t.Fatalf("err = %v", err)
+	}
+	if synced(ch.sites["acme"]) {
+		t.Error("it stops at the first failure: acme is not touched")
+	}
+
+	ch, bin = upgradeHarness(t, "")
+	ch.sites["beta"].Fail("test -d", 1, "")
+	err = ch.run("fleet", "upgrade", "--all", "--continue-on-error", "--server-binary", bin)
+	if err == nil || !strings.Contains(err.Error(), "upgrade failed on beta") {
+		t.Fatalf("the failure is still the result of the command, got %v", err)
+	}
+	if !synced(ch.sites["acme"]) {
+		t.Error("with --continue-on-error the other target is upgraded")
+	}
+	if !strings.Contains(ch.out.String(), "beta: FAILED, continuing") {
+		t.Errorf("the failure is said as it happens:\n%s", ch.out)
+	}
+}
+
+func TestFleetUpgradeDryRunSendsNothing(t *testing.T) {
+	ch, bin := upgradeHarness(t, "")
+	if err := ch.run("--dry-run", "fleet", "upgrade", "--all", "--server-binary", bin); err != nil {
+		t.Fatalf("%v\n%s", err, ch.out)
+	}
+	if synced(ch.sites["acme"]) || synced(ch.sites["beta"]) {
+		t.Error("a dry run uploads nothing")
+	}
+}
+
+// A fleet deploy changes what runs on several servers: it is never implicit, and never a question either.
+func TestFleetDeployNeverAsksWhichTargets(t *testing.T) {
+	ch := remoteHarness(t, "1,2\n")
+	err := ch.run("fleet", "deploy", "--version", "1.0.0")
+	if err == nil || !strings.Contains(err.Error(), "a fleet deploy is never implicit") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(ch.out.String(), "Which targets") || len(ch.sites) != 0 {
+		t.Errorf("no question and no server contacted:\n%s", ch.out)
+	}
+}
+
+func sha256Hex(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path) //nolint:gosec // a test file
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
