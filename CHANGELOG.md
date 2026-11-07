@@ -10,6 +10,9 @@ all of it.
 
 ## [Unreleased]
 
+### Added
+- **A target picker.** A command that needs a target (`status`, `deploy`, `rollback`, `bootstrap`, `doctor`, `run`, `release`, `healthcheck`, `env`...) used to fail with "choose a target with --target" when the inventory holds several. At a terminal it now asks which one: a list of the targets with their domain and host, filtered as you type, titled with the command it is for. It then says which `--target` to type next time. Without a terminal (a script, a pipe, CI) nothing is asked: the error and the exit code are unchanged. An empty inventory now says to add a target with `deploykit target add`.
+
 ## [0.6.0] - 2026-11-07
 
 ### Added

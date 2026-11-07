@@ -64,6 +64,10 @@ deploykit fleet deploy --all            # pm2 sites: build and deploy each targe
 
 Every command takes `--dry-run`: read-only checks run, nothing is changed.
 
+**Choosing the target.** `-t/--target` names the target a command works on. With a single target in the inventory it is implied. With several and no `--target`,
+a command run at a terminal asks which one (a list of the targets with their domain and host; type to filter, Enter to choose, Ctrl-C to leave), says
+what to type next time, then goes on. A script, a pipe and CI never get a question: they fail with the list of targets, as before.
+
 `deploykit init` recognises a Next.js project (pm2) or a Docker Compose stack, proposes the project name, the services and
 the Dockerfiles it found, and lets you choose the sections you want (backups, restore test, monitoring, crons, quality
 checks, smoke test). It never overwrites a file without asking. Without a terminal, give the answers as flags:

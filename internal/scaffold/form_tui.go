@@ -100,6 +100,30 @@ func Confirm(o FormOptions, title, yes, no string) (bool, error) {
 	return ok, nil
 }
 
+// Pick asks the user to choose one of several options: the labels are shown and the value of the chosen one is returned. The
+// choice starts on the first option. The user leaving the form (Ctrl-C, or an input that ends) is ErrAborted.
+func Pick(o FormOptions, title, desc string, labels, values []string) (string, error) {
+	if len(labels) == 0 || len(labels) != len(values) {
+		return "", fmt.Errorf("nothing to pick from (%d labels, %d values)", len(labels), len(values))
+	}
+	cs := make([]choice, len(labels))
+	for i := range labels {
+		cs[i] = choice{labels[i], values[i]}
+	}
+	picked := values[0]
+	q := question{kind: qSelect, title: title, desc: desc, str: &picked, options: func() []choice { return cs }}
+	var err error
+	if o.Accessible {
+		err = newLiner(o).askSelect(q)
+	} else {
+		err = runForm(huh.NewForm(huh.NewGroup(huhField(q))), o)
+	}
+	if err != nil {
+		return "", err
+	}
+	return picked, nil
+}
+
 // ChooseConflict asks what to do with files that exist with other content. The bool is false when the user stops.
 func ChooseConflict(o FormOptions, paths []string) (Conflict, bool, error) {
 	picked := "stop"

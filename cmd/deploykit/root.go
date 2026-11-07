@@ -50,7 +50,10 @@ func newRootCmdTo(out io.Writer, a *app) *cobra.Command {
 		a.selfUpdateCmd(),
 	)
 	// The daily look at the releases runs beside the command and its result is told after it (cmd_selfupdate.go).
-	root.PersistentPreRun = a.beginUpdateCheck
+	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		a.cmdPath = cmd.CommandPath()
+		a.beginUpdateCheck(cmd, args)
+	}
 	root.PersistentPostRun = a.endUpdateCheck
 	a.installHelp(root)
 	return root

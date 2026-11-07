@@ -45,6 +45,7 @@ type app struct {
 	goarch      string
 	checkWait   time.Duration
 	updateDone  chan struct{} // closed when the daily look of this run is over; nil when there is none
+	cmdPath     string        // the command being run ("deploykit deploy"), for the questions that name it
 
 	out io.Writer
 	in  io.Reader // what the forms read; os.Stdin when nil
@@ -72,6 +73,8 @@ type project struct {
 	dir    string // where the manifest lives: the inventory and the global configuration are relative to it
 	repo   string // the git repository to build and upload from (--repo; default: dir)
 	global *envfile.Doc
+	// pick asks which target to use when the inventory has several and none was named; ok is false when nobody can be asked.
+	pick func(ids []string) (id string, ok bool, err error)
 }
 
 func (a *app) load() (*project, error) {
@@ -88,6 +91,7 @@ func (a *app) load() (*project, error) {
 		return nil, err
 	}
 	p := &project{m: m, dir: filepath.Dir(abs)}
+	p.pick = func(ids []string) (string, bool, error) { return a.pickTarget(p.inventoryDir(), ids, p.global) }
 	p.repo = p.dir
 	if a.repoPath != "" {
 		if p.repo, err = filepath.Abs(a.repoPath); err != nil {
@@ -114,17 +118,32 @@ func (p *project) inventoryDir() string {
 	return filepath.Join(p.dir, dir)
 }
 
-// target opens the named target; with no name, the only one of the inventory.
+// target opens the named target. With no name it is the only one of the inventory; when there are several, a person at a terminal
+// is asked which one, and anything else (a script, a pipe, CI) gets an error that lists them.
 func (p *project) target(id string) (*inventory.Target, error) {
 	if id == "" {
 		ids, err := inventory.List(p.inventoryDir())
 		if err != nil {
 			return nil, err
 		}
-		if len(ids) != 1 {
+		switch {
+		case len(ids) == 0:
+			return nil, fmt.Errorf("the inventory %s holds no target: add one with 'deploykit target add'", p.inventoryDir())
+		case len(ids) == 1:
+			id = ids[0]
+		default:
+			if p.pick != nil {
+				chosen, asked, perr := p.pick(ids)
+				if perr != nil {
+					return nil, perr
+				}
+				if asked {
+					id = chosen
+					break
+				}
+			}
 			return nil, fmt.Errorf("choose a target with --target (inventory %s: %v)", p.inventoryDir(), ids)
 		}
-		id = ids[0]
 	}
 	return inventory.Open(p.inventoryDir(), id, p.global)
 }
