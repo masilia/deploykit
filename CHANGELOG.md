@@ -10,6 +10,8 @@ all of it.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-07
+
 ### Fixed
 - **The question of `fleet status`, `fleet healthcheck`, `fleet backups` and `fleet upgrade` looked broken.** It was a list to mark with Space, and pressing Enter at once, the gesture of every other picker, ended with "no target selected". It now starts like the others: Enter takes the highlighted target, and the last two lines of the list are "all N targets" and "several", which opens the list to mark, where validating with nothing marked is refused on the screen (and asked again with line prompts) instead of failing afterwards. In line-prompt mode (`--plain`, a dumb terminal) a second question no longer finds the input already swallowed by the first.
 
@@ -177,7 +179,8 @@ The first public version: one binary, driven by a per-project `deploykit.yaml`, 
 - `--dry-run` that changes nothing, the lock included; secrets that never reach a command line, a log or an error message.
 - Documentation: `PLAN.md`, decision records, a CloudPanel CLI reference and the record of what ran on a real server.
 
-[Unreleased]: https://github.com/masilia/deploykit/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/masilia/deploykit/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/masilia/deploykit/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/masilia/deploykit/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/masilia/deploykit/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/masilia/deploykit/compare/v0.6.0...v0.7.0
