@@ -10,6 +10,8 @@ all of it.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-07
+
 ### Added
 - **`deploykit deploy --binary-only` and `deploykit fleet upgrade`** put this machine's deploykit (or the build `--server-binary` names) on the server of one target, or of several in rollout order, and do nothing else: no files, no `.env`, no update, no restart. Until now the binary of a server only changed with a full deploy (backup, pull, migrations, restart). It checks that the binary can run on that platform, that the deployment root exists (a server where `deploy --install` never ran is refused), that the upload arrived intact (SHA-256), and prints the version the server now runs; an identical binary is not sent again. Cron and `deploykit server ...` use that binary, so they run the new one from their next call. `--dry-run` connects, reads and says what it would send. `fleet upgrade` asks which targets at a terminal, like `fleet status`, and takes `--continue-on-error`.
 
@@ -172,7 +174,8 @@ The first public version: one binary, driven by a per-project `deploykit.yaml`, 
 - `--dry-run` that changes nothing, the lock included; secrets that never reach a command line, a log or an error message.
 - Documentation: `PLAN.md`, decision records, a CloudPanel CLI reference and the record of what ran on a real server.
 
-[Unreleased]: https://github.com/masilia/deploykit/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/masilia/deploykit/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/masilia/deploykit/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/masilia/deploykit/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/masilia/deploykit/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/masilia/deploykit/compare/v0.5.1...v0.6.0
