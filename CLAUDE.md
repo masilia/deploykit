@@ -81,6 +81,9 @@ standalone); an ingress may use `select` + `variants` (the `TLS_MODE` key: varia
 
 ## Conventions that are easy to get wrong
 
+- **A command that needs a target takes it from `project.target(id)`** (the only target, `--target`, or the picker at a terminal) and a command that works on several
+  from `fleetSelection`; never read the inventory by hand, or the picker and its "no question without a terminal" rule are skipped. The questions themselves are
+  `scaffold.Pick` / `PickMany`, on the two renderers `init` has.
 - **Fake rules are first-match.** When a test needs a failure, register it before the success rules (see `newUpdateOpts`
   `pre`, `newInstall`); a late `Fail(...)` is silently ignored.
 - Tests assert on `Fake.Trace()`; secrets must never appear in it (`Secrets` are masked, `Stdin` shows only its size).

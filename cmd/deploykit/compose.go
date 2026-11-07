@@ -208,8 +208,20 @@ func (a *app) composeStatus(ctx context.Context, p *project, targets []*inventor
 	return rows, nil
 }
 
-// fleetSelection resolves --all / --target / --supervised into targets.
+// fleetSelection resolves --all / --target / --supervised into targets; with none of them, a terminal asks which ones.
 func (a *app) fleetSelection(p *project, ids []string, all, supervised bool) ([]*inventory.Target, error) {
+	if len(ids) == 0 && !all && !supervised {
+		// Nothing says which targets: a person at a terminal is asked; anyone else gets the error below, as before.
+		if every, lerr := inventory.List(p.inventoryDir()); lerr == nil {
+			picked, asked, perr := a.pickTargets(p.inventoryDir(), every, p.global)
+			if perr != nil {
+				return nil, perr
+			}
+			if asked {
+				ids = picked
+			}
+		}
+	}
 	ts, err := inventory.Select(p.inventoryDir(), ids, all, supervised, p.global)
 	if err != nil {
 		return nil, err

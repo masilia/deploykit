@@ -66,7 +66,8 @@ Every command takes `--dry-run`: read-only checks run, nothing is changed.
 
 **Choosing the target.** `-t/--target` names the target a command works on. With a single target in the inventory it is implied. With several and no `--target`,
 a command run at a terminal asks which one (a list of the targets with their domain and host; type to filter, Enter to choose, Ctrl-C to leave), says
-what to type next time, then goes on. A script, a pipe and CI never get a question: they fail with the list of targets, as before.
+what to type next time, then goes on. `fleet …`, which works on several targets, asks for any number of them (Space marks, Enter validates) when you give neither
+`--all` nor `--target`. A script, a pipe and CI never get a question: they fail with the list of targets, as before.
 
 `deploykit init` recognises a Next.js project (pm2) or a Docker Compose stack, proposes the project name, the services and
 the Dockerfiles it found, and lets you choose the sections you want (backups, restore test, monitoring, crons, quality
@@ -95,7 +96,7 @@ query that the terminal library sends at start-up, `TERM=dumb` skips it.
 | `env list\|get\|set` | compose: manage the server `.env` over SSH: list it with the secrets masked, read one variable (a secret needs `--reveal`), set one or several without a full deploy (`--apply` recreates the services) |
 | `self-update` | replace this deploykit by the latest release (`--check`, `--version`, `--pre`, `--force`) |
 | `healthcheck`, `fleet …` | health probes of a target; status, health, backups and ordered deploys across targets |
-| `server update\|install\|backup\|monitor\|restore-test\|renew-certs\|cron\|crons` | run on the server by `deploy` and by cron; not meant to be typed by hand |
+| `server update\|install\|backup\|monitor\|restore-test\|renew-certs\|cron\|crons` | run on the server by `deploy` and by cron. Typed on a workstation, in a project, they run on a target over SSH (`--target`, or a question at a terminal), with the deploykit that `deploy` uploaded; `update` and `install` stay with `deploy` |
 
 ## What it guarantees
 

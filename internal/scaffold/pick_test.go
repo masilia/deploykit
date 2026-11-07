@@ -49,3 +49,35 @@ func TestPickRefusesNothingToChooseFrom(t *testing.T) {
 		}
 	}
 }
+
+func pickManyWith(t *testing.T, input string, labels, values []string) ([]string, string, error) {
+	t.Helper()
+	out := &bytes.Buffer{}
+	got, err := PickMany(FormOptions{In: bufio.NewReader(strings.NewReader(input)), Out: out, Accessible: true}, "Which ones?", "Space marks.", labels, values)
+	return got, out.String(), err
+}
+
+func TestPickManyReturnsTheMarkedValuesInTheOrderOfTheOptions(t *testing.T) {
+	labels, values := []string{"alpha", "beta", "gamma"}, []string{"a", "b", "g"}
+	for input, want := range map[string]string{"1\n": "a", "3,1\n": "a,g", "1, 2 ,3\n": "a,b,g", "-\n": "", "\n": ""} {
+		got, out, err := pickManyWith(t, input, labels, values)
+		if err != nil || strings.Join(got, ",") != want {
+			t.Errorf("input %q: got %v, %v; want %q", input, got, err, want)
+		}
+		if !strings.Contains(out, "Which ones?") || !strings.Contains(out, "[ ] 1. alpha") {
+			t.Errorf("nothing is marked at the start:\n%s", out)
+		}
+	}
+	if got, _, err := pickManyWith(t, "9\nx\n2\n", labels, values); err != nil || strings.Join(got, ",") != "b" {
+		t.Errorf("bad answers are asked again: %v, %v", got, err)
+	}
+}
+
+func TestPickManyWhenTheInputEndsIsAnAbortAndNeedsOptions(t *testing.T) {
+	if _, _, err := pickManyWith(t, "", []string{"a", "b"}, []string{"a", "b"}); !errors.Is(err, ErrAborted) {
+		t.Errorf("an input that ends is ErrAborted, got %v", err)
+	}
+	if _, _, err := pickManyWith(t, "1\n", nil, nil); err == nil {
+		t.Error("nothing to choose from is an error")
+	}
+}

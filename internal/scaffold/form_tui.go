@@ -124,6 +124,31 @@ func Pick(o FormOptions, title, desc string, labels, values []string) (string, e
 	return picked, nil
 }
 
+// PickMany asks the user to choose any number of the options (none is the user's right: the result is then empty and the caller says
+// what that means). Nothing is chosen at the start, so that a choice is always deliberate. The values come back in the order of the
+// options. Leaving the form is ErrAborted.
+func PickMany(o FormOptions, title, desc string, labels, values []string) ([]string, error) {
+	if len(labels) == 0 || len(labels) != len(values) {
+		return nil, fmt.Errorf("nothing to pick from (%d labels, %d values)", len(labels), len(values))
+	}
+	cs := make([]choice, len(labels))
+	for i := range labels {
+		cs[i] = choice{labels[i], values[i]}
+	}
+	picked := []string{}
+	q := question{kind: qMulti, title: title, desc: desc, list: &picked, options: func() []choice { return cs }}
+	var err error
+	if o.Accessible {
+		err = newLiner(o).askMulti(q)
+	} else {
+		err = runForm(huh.NewForm(huh.NewGroup(huhField(q))), o)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return picked, nil
+}
+
 // ChooseConflict asks what to do with files that exist with other content. The bool is false when the user stops.
 func ChooseConflict(o FormOptions, paths []string) (Conflict, bool, error) {
 	picked := "stop"

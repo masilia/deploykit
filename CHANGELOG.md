@@ -10,6 +10,10 @@ all of it.
 
 ## [Unreleased]
 
+### Added
+- **`deploykit server <command>` works from a workstation.** Typed in a project that has no deployment root (no `.deploykit/target.env`, which only the server holds), it used to fail with "target file ... not found". It now runs on a target over SSH, with the deploykit binary that `deploy` uploaded to the server, and brings the output back: `--target` names the target, a terminal asks when there are several, and `--dry-run`, `--base-url`, `--file`... are passed on. A server where `deploy` never ran says to run it; an unreachable one is not reported as a missing binary. `update` and `install` are not run this way: they are the last step of `deploykit deploy`, which uploads the binary and the files they run with. On the server nothing changes.
+- **`fleet` asks which targets** when you give neither `--all`, `--target` nor `--supervised`, at a terminal: a list where Space marks a target and Enter validates, with the reminder of the options to type next time. Without a terminal it fails as before ("no target selected").
+
 ## [0.7.0] - 2026-11-07
 
 ### Added

@@ -119,18 +119,34 @@ func slack(env *envfile.Doc) func(context.Context, string) {
 }
 
 func (a *app) serverCmd() *cobra.Command {
-	var targetFile string
+	var targetFile, target string
 	cmd := &cobra.Command{
 		Use:   "server",
 		Short: "Operations that run on the server, inside a deployment root (compose stacks)",
+		Long: `Operations on a compose stack: they run on the server, inside the deployment root that 'deploykit deploy' made, with the deploykit binary it uploaded
+(cron calls them too).
+
+Typed on a workstation, in a project, they run on a target over SSH: --target names it, and a terminal asks when there are several.
+'update' and 'install' are left to 'deploykit deploy', which uploads the binary and the files they run with.`,
 	}
 	cmd.PersistentFlags().StringVar(&targetFile, "target-file", "", "this server's target file (default: .deploykit/target.env)")
+	cmd.PersistentFlags().StringVarP(&target, "target", "t", "", "from a workstation: the target to run on (default: the only one, or a question at a terminal; unused on the server)")
 	load := func() (*serverCtx, error) { return a.serverLoad(targetFile) }
 
 	cmd.AddCommand(
 		a.serverUpdate(load), a.serverInstall(load), a.serverBackup(load), a.serverHealthcheck(load),
 		a.serverMonitor(load), a.serverRestoreTest(load), a.serverRenewCerts(load), a.serverCron(load), a.serverCrons(load),
 	)
+	// Typed on a workstation, each of them runs on the chosen target instead of looking for a deployment root here.
+	for _, sub := range cmd.Commands() {
+		onServer := sub.RunE
+		sub.RunE = func(c *cobra.Command, args []string) error {
+			if p, remote := a.serverIsRemote(targetFile); remote {
+				return a.serverRemote(c, p, target)
+			}
+			return onServer(c, args)
+		}
+	}
 	return cmd
 }
 
