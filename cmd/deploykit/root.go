@@ -48,6 +48,7 @@ func newRootCmdTo(out io.Writer, a *app) *cobra.Command {
 		a.initCmd(),
 		a.targetCmd(),
 	)
+	a.installHelp(root)
 	return root
 }
 

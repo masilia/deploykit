@@ -33,6 +33,7 @@ type app struct {
 	dryRun       bool
 	plain        bool // --plain: timestamped lines and line prompts, even at a terminal
 	forceStyled  bool // tests: render the styled layout without a terminal
+	helpCols     int  // tests: the width of the styled help; 0 asks the terminal
 
 	out io.Writer
 	in  io.Reader // what the forms read; os.Stdin when nil
