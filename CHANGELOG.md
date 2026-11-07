@@ -10,6 +10,8 @@ all of it.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-07
+
 ### Added
 - **A target picker.** A command that needs a target (`status`, `deploy`, `rollback`, `bootstrap`, `doctor`, `run`, `release`, `healthcheck`, `env`...) used to fail with "choose a target with --target" when the inventory holds several. At a terminal it now asks which one: a list of the targets with their domain and host, filtered as you type, titled with the command it is for. It then says which `--target` to type next time. Without a terminal (a script, a pipe, CI) nothing is asked: the error and the exit code are unchanged. An empty inventory now says to add a target with `deploykit target add`.
 
@@ -158,7 +160,8 @@ The first public version: one binary, driven by a per-project `deploykit.yaml`, 
 - `--dry-run` that changes nothing, the lock included; secrets that never reach a command line, a log or an error message.
 - Documentation: `PLAN.md`, decision records, a CloudPanel CLI reference and the record of what ran on a real server.
 
-[Unreleased]: https://github.com/masilia/deploykit/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/masilia/deploykit/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/masilia/deploykit/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/masilia/deploykit/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/masilia/deploykit/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/masilia/deploykit/compare/v0.4.0...v0.5.0
