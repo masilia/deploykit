@@ -10,6 +10,8 @@ all of it.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-07
+
 ### Added
 - **`deploykit server <command>` works from a workstation.** Typed in a project that has no deployment root (no `.deploykit/target.env`, which only the server holds), it used to fail with "target file ... not found". It now runs on a target over SSH, with the deploykit binary that `deploy` uploaded to the server, and brings the output back: `--target` names the target, a terminal asks when there are several, and `--dry-run`, `--base-url`, `--file`... are passed on. A server where `deploy` never ran says to run it; an unreachable one is not reported as a missing binary. `update` and `install` are not run this way: they are the last step of `deploykit deploy`, which uploads the binary and the files they run with. On the server nothing changes.
 - **`fleet` asks which targets** when you give neither `--all`, `--target` nor `--supervised`, at a terminal: a list where Space marks a target and Enter validates, with the reminder of the options to type next time. Without a terminal it fails as before ("no target selected").
@@ -164,7 +166,8 @@ The first public version: one binary, driven by a per-project `deploykit.yaml`, 
 - `--dry-run` that changes nothing, the lock included; secrets that never reach a command line, a log or an error message.
 - Documentation: `PLAN.md`, decision records, a CloudPanel CLI reference and the record of what ran on a real server.
 
-[Unreleased]: https://github.com/masilia/deploykit/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/masilia/deploykit/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/masilia/deploykit/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/masilia/deploykit/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/masilia/deploykit/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/masilia/deploykit/compare/v0.5.0...v0.5.1
