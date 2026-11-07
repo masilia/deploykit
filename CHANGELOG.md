@@ -10,6 +10,8 @@ all of it.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-07
+
 ### Added
 - **`deploykit self-update`** replaces the binary by the latest release of the project: the archive of the platform from the public GitHub releases is checked against the release's `checksums.txt`, the unpacked binary has to run and report that version, and only then is it swapped in atomically; the old one is kept as `deploykit.old` and the `dk` link follows. Only `https` downloads are accepted, sizes are capped, and only a file named `deploykit` at the top of the archive is taken. `--check` says whether a newer release exists, `--version X.Y.Z` installs one (an older one needs `--force`), `--pre` offers release candidates, `--dry-run` shows the plan. A build from a checkout is left alone unless `--force`; the servers keep the binary of their last deploy until the next `deploykit deploy`.
 - **A notice when a newer release exists**: once a day, at a terminal, deploykit looks at the latest release in the background (never longer than a third of a second is spent waiting for it) and says so on stderr, once a day. It is silent in a pipe, in CI, with `--plain`, for a build from a checkout and for the commands cron and the shell completion run. `DEPLOYKIT_NO_UPDATE_CHECK=1` turns it off.
@@ -153,7 +155,8 @@ The first public version: one binary, driven by a per-project `deploykit.yaml`, 
 - `--dry-run` that changes nothing, the lock included; secrets that never reach a command line, a log or an error message.
 - Documentation: `PLAN.md`, decision records, a CloudPanel CLI reference and the record of what ran on a real server.
 
-[Unreleased]: https://github.com/masilia/deploykit/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/masilia/deploykit/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/masilia/deploykit/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/masilia/deploykit/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/masilia/deploykit/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/masilia/deploykit/compare/v0.3.0...v0.4.0
