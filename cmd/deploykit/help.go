@@ -33,7 +33,7 @@ var helpGroups = []helpGroup{
 	{"Ship", []string{"release", "deploy", "rollback"}},
 	{"Operate", []string{"status", "run", "env", "healthcheck", "fleet"}},
 	{"Set up", []string{"init", "target", "bootstrap", "validate", "doctor"}},
-	{"Other", []string{"version", "help", "completion", "server"}},
+	{"Other", []string{"self-update", "version", "help", "completion", "server"}},
 }
 
 // Widths of the help: the terminal's when known, capped so lines stay readable, and what is used when it is not known.
@@ -138,6 +138,9 @@ func (a *app) printHelp(cmd *cobra.Command) {
 		b.WriteString("\n" + st.Muted.Render(fmt.Sprintf("Run '%s <command> --help' for details on a command.", cmd.CommandPath())) + "\n")
 	}
 	_, _ = fmt.Fprint(w, b.String())
+	if cmd.Parent() == nil {
+		a.printUpdateNotice(w, cmd) // from what is remembered: the help asks the network for nothing
+	}
 }
 
 // usageLines are the ways to run cmd: its own line when it runs by itself, and one for its subcommands. "flags" is called

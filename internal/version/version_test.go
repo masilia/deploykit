@@ -44,3 +44,29 @@ func TestStringHasTheExpectedShape(t *testing.T) {
 		t.Errorf("String() = %q", s)
 	}
 }
+
+func TestRelease(t *testing.T) {
+	cases := []struct {
+		name    string
+		version string
+		main    string
+		want    string
+		ok      bool
+	}{
+		{"goreleaser build", "0.5.1", "", "0.5.1", true},
+		{"tag with its v", "v0.5.1", "", "0.5.1", true},
+		{"release candidate", "0.6.0-rc.1", "", "0.6.0-rc.1", true},
+		{"go install pkg@v0.1.0", "dev", "v0.1.0", "0.1.0", true},
+		{"make build between two tags", "v0.5.1-8-g732186d", "", "", false},
+		{"make build, modified tree", "v0.5.1-8-g732186d-dirty", "", "", false},
+		{"plain go build", "dev", "(devel)", "", false},
+		{"go build of an untagged checkout", "dev", "v0.0.0-20261027235447-57a57ff6d2e7", "", false},
+		{"nothing", "", "", "", false},
+	}
+	for _, c := range cases {
+		got, ok := release(c.version, &debug.BuildInfo{Main: debug.Module{Version: c.main}})
+		if got != c.want || ok != c.ok {
+			t.Errorf("%s: release(%q, main %q) = %q, %v; want %q, %v", c.name, c.version, c.main, got, ok, c.want, c.ok)
+		}
+	}
+}

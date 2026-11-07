@@ -24,6 +24,18 @@ go install github.com/masilia/deploykit/cmd/deploykit@latest
 (`command -v deploykit` shows which one runs). From a checkout, `make install` builds and installs `deploykit` and `dk`
 into `~/.local/bin` (`PREFIX=/usr/local make install` for another place).
 
+### Updating
+
+`deploykit self-update` replaces the binary by the latest release: it downloads the archive of your platform from the public GitHub releases, checks it against
+the release's `checksums.txt`, makes sure the new binary runs, and only then swaps it in (the old one stays next to it as `deploykit.old`, and `dk` follows since it is a
+link). `--check` only says whether a newer release exists, `--version X.Y.Z` picks one, `--pre` also offers release candidates, and `--dry-run` shows the plan. A build
+made from a checkout (`make build`) is left alone unless you pass `--force`. The servers keep the binary of their last deploy: it follows at the next `deploykit deploy`.
+`self-update` only handles releases: a checksum shows that the download is intact, not who published it.
+
+**The daily look.** Once a day, at a terminal, deploykit asks `api.github.com` which release is the latest (one request, nothing about you or your projects, in the
+background so that no command waits for it) and says on stderr when a newer one exists. It stays silent in a pipe, a script, CI and `--plain`, for a build from a checkout, and
+for the commands cron and the shell completion run. `DEPLOYKIT_NO_UPDATE_CHECK=1` turns it off; the answer is cached in `~/.cache/deploykit/update.json`.
+
 You need `git`, `ssh` and `rsync` on the workstation, plus `node` for Next.js builds or `docker` for image releases.
 `deploykit doctor` checks the workstation and the server. For Docker Compose stacks the server also needs `docker`
 (compose 2.24+), `gpg` and `cron`; deploykit uploads its own binary there.
@@ -77,6 +89,7 @@ query that the terminal library sends at start-up, `TERM=dumb` skips it.
 | `release` | build the images from a git tag and push them (`deploy` does it when they are missing) |
 | `run [command]` | run a named command of the manifest: php-fpm, in the live release (`runtime.commands`; `deploy --also <command>` runs one after a deploy); compose, in a one-off container of the app service (`runtime.app.commands`, `--exec` for the running one). Without a name, compose lists the commands |
 | `env list\|get\|set` | compose: manage the server `.env` over SSH: list it with the secrets masked, read one variable (a secret needs `--reveal`), set one or several without a full deploy (`--apply` recreates the services) |
+| `self-update` | replace this deploykit by the latest release (`--check`, `--version`, `--pre`, `--force`) |
 | `healthcheck`, `fleet …` | health probes of a target; status, health, backups and ordered deploys across targets |
 | `server update\|install\|backup\|monitor\|restore-test\|renew-certs\|cron\|crons` | run on the server by `deploy` and by cron; not meant to be typed by hand |
 

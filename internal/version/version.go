@@ -4,6 +4,7 @@ package version
 
 import (
 	"fmt"
+	"regexp"
 	"runtime/debug"
 	"strings"
 )
@@ -54,4 +55,29 @@ func format(version, commit, date string, bi *debug.BuildInfo) string {
 // pseudo-version Go stamps on a build from an untagged checkout (v0.0.0-20261027235447-57a57ff6d2e7, possibly +dirty).
 func isRelease(v string) bool {
 	return v != "" && v != "(devel)" && !strings.HasPrefix(v, "v0.0.0-") && !strings.Contains(v, "+dirty")
+}
+
+// releasePattern is a tagged version without its leading v: 0.5.1, 1.2.3-rc.1.
+var releasePattern = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$`)
+
+// describePattern is what `git describe` appends to a build between two tags: 0.5.1-8-g732186d, with -dirty when the tree was modified.
+var describePattern = regexp.MustCompile(`-\d+-g[0-9a-f]{7,}(-dirty)?$`)
+
+// Release returns the version of this binary, without the leading v (0.5.1), when it is a tagged release: what GoReleaser builds, or
+// `go install pkg@vX.Y.Z`. It is false for a build from a checkout (dev, 0.5.1-8-g732186d, a modified tree), which has no version
+// anyone could compare with a release.
+func Release() (string, bool) {
+	bi, _ := debug.ReadBuildInfo()
+	return release(Version, bi)
+}
+
+func release(v string, bi *debug.BuildInfo) (string, bool) {
+	if v == "dev" && bi != nil && isRelease(bi.Main.Version) {
+		v = bi.Main.Version
+	}
+	v = strings.TrimPrefix(v, "v")
+	if !releasePattern.MatchString(v) || describePattern.MatchString(v) || strings.HasSuffix(v, "-dirty") {
+		return "", false
+	}
+	return v, true
 }

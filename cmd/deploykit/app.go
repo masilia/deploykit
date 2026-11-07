@@ -14,6 +14,7 @@ import (
 	"github.com/masilia/deploykit/internal/inventory"
 	"github.com/masilia/deploykit/internal/manifest"
 	"github.com/masilia/deploykit/internal/runner"
+	"github.com/masilia/deploykit/internal/selfupdate"
 	"github.com/masilia/deploykit/internal/transport"
 )
 
@@ -34,6 +35,16 @@ type app struct {
 	plain        bool // --plain: timestamped lines and line prompts, even at a terminal
 	forceStyled  bool // tests: render the styled layout without a terminal
 	helpCols     int  // tests: the width of the styled help; 0 asks the terminal
+
+	// Seams of self-update and of the daily notice (cmd_selfupdate.go); nil or zero means the real thing.
+	releases    *selfupdate.Client
+	exePath     func() (string, error)
+	currentVer  func() (string, bool)
+	updateCache *selfupdate.Cache
+	goos        string
+	goarch      string
+	checkWait   time.Duration
+	updateDone  chan struct{} // closed when the daily look of this run is over; nil when there is none
 
 	out io.Writer
 	in  io.Reader // what the forms read; os.Stdin when nil
